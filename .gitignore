@@ -1,0 +1,24 @@
+# Build output
+backend/target/
+frontend/dist/
+frontend/node_modules/
+node_modules/
+coverage/
+frontend/test-results/
+frontend/playwright-report/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Runtime
+backend/uploads/
+backups/
+*.log
