@@ -1,0 +1,62 @@
+# Profile "test": used by the automated test suite (mvn verify).
+# In-memory H2 in PostgreSQL mode (same URL style as application-dev.yml, unique DB name),
+# Flyway migrations + Hibernate ddl validation, no demo data, simulated payments.
+spring:
+  datasource:
+    url: jdbc:h2:mem:booking_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=20000
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  mail:
+    host: ""
+  h2:
+    console:
+      enabled: false
+
+app:
+  app-url: http://localhost:5173
+  jwt:
+    secret: ""
+    allow-ephemeral-secret: true
+  seed:
+    demo-data: false
+  bootstrap-admin:
+    email: ""
+    password: ""
+  mail:
+    enabled: false
+  sms:
+    provider: log
+  google:
+    client-id: ""
+  payments:
+    demo-mode: true
+    razorpay:
+      key-id: ""
+      key-secret: ""
+      # Lets the webhook endpoint be exercised with a known HMAC secret (does not make the gateway "live")
+      webhook-secret: test-webhook-secret
+  security:
+    rate-limit:
+      enabled: false
+  slot-lock:
+    store: db
+  video:
+    base-url: https://meet.jit.si
+  uploads:
+    dir: ${java.io.tmpdir}/booking-test-uploads
+  jobs:
+    # Jobs are also switched off by the test configuration (no-op task scheduler);
+    # tests call SchedulerJobs methods directly with a controllable clock.
+    reminder-interval-ms: 86400000
+    cleanup-interval-ms: 86400000
+
+logging:
+  level:
+    root: WARN
+    com.booking: WARN
+    org.springframework.boot.test: WARN
