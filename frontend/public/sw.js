@@ -14,9 +14,10 @@ const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg', '
 const NO_API_CACHE = /^\/api\/(auth|slots|payments|coupons|notifications)(\/|$)/;
 
 self.addEventListener('install', (event) => {
+  // One missing file (e.g. a server that doesn't expose /index.html) must not abort the install.
   event.waitUntil(
     caches.open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL))
+      .then((cache) => Promise.allSettled(SHELL.map((url) => cache.add(url))))
       .then(() => self.skipWaiting())
   );
 });

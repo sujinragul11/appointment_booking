@@ -9,6 +9,7 @@ import { useToast } from '../../components/Toast';
 import {
   formatDate, formatDateTime, formatInZone, formatMoney, formatTime, formatViewerTime, downloadText, isValidTimeZone, nextDays
 } from '../../utils/format';
+import { isOpenSlot, parseSlots } from '../../utils/slots';
 
 // Statuses the customer can still cancel or move.
 const CHANGEABLE = ['PENDING', 'CONFIRMED', 'RESCHEDULED'];
@@ -55,7 +56,7 @@ export default function AppointmentDetail() {
       if (appt.staffId) params.staffId = appt.staffId; // keep the same team member
       const { data } = await api.get('/slots', { params });
       if (requestId !== slotRequest.current) return;
-      setSlots((Array.isArray(data) ? data : []).filter((s) => s.status === 'AVAILABLE'));
+      setSlots(parseSlots(data).slots.filter(isOpenSlot));
     } catch (e) {
       if (requestId !== slotRequest.current) return;
       setSlots([]);

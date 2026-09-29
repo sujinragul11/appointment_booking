@@ -85,7 +85,9 @@ export async function notifyLatestUnread() {
 
 export function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  window.addEventListener('load', () => {
+  const register = () => {
     navigator.serviceWorker.register('/sw.js').catch((err) => console.warn('Service worker registration failed', err));
-  });
+  };
+  if (document.readyState === 'complete') register();
+  else window.addEventListener('load', register, { once: true });
 }

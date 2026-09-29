@@ -72,7 +72,8 @@ main:focus { outline: none; }
 
 /* ---------- Layout ---------- */
 .container { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
-.page { min-height: calc(100vh - 340px); padding: 40px 0 80px; }
+/* Vertical padding only: .page is combined with .container, whose side padding must survive. */
+.page { min-height: calc(100vh - 340px); padding-top: 40px; padding-bottom: 80px; }
 .grid { display: grid; gap: 20px; }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
@@ -128,7 +129,7 @@ main:focus { outline: none; }
   border-color: var(--brand-600); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.35);
 }
 .field [aria-invalid="true"] { border-color: var(--red); }
-.field .hint { font-size: 0.8rem; color: var(--muted); }
+.hint, .field .hint { font-size: 0.8rem; color: var(--muted); }
 .field .hint.error-text { color: var(--red-ink); }
 .field .hint.success-text { color: var(--green); }
 .form-error { background: var(--red-bg); color: var(--red-ink); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.88rem; margin-bottom: 14px; }
@@ -192,10 +193,11 @@ main:focus { outline: none; }
 .nav-links a { padding: 9px 14px; border-radius: 999px; color: var(--ink-2); font-weight: 600; font-size: 0.94rem; }
 .nav-links a:hover { background: #f1f5f9; color: var(--ink); }
 .nav-links a.active { background: #eef2ff; color: var(--brand-700); }
-.nav-links a.btn-primary { color: #fff; }
+.nav-links a.btn-primary, .nav-links a.btn-primary:hover { background: var(--gradient); color: #fff; }
 .nav-actions { display: flex; align-items: center; gap: 12px; }
 .nav-user { display: flex; align-items: center; gap: 12px; }
 .nav-links .avatar, .nav-links .bell-wrap { padding: 0; }
+.nav-links a.avatar, .nav-links a.avatar:hover { color: #fff; background: var(--gradient); }
 .lang-select { border: 1.5px solid var(--line); border-radius: 999px; padding: 6px 10px; background: #fff; color: var(--ink-2); font-weight: 600; font-size: 0.85rem; cursor: pointer; }
 .avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--gradient); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 0.86rem; flex-shrink: 0; }
 .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
@@ -403,8 +405,9 @@ li .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand-5
 @media (max-width: 900px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
-  .dash { grid-template-columns: 1fr; padding-top: 24px; }
-  .dash-side { position: static; }
+  /* minmax(0, 1fr): the scrollable sidebar nav must not widen the column past the screen */
+  .dash { grid-template-columns: minmax(0, 1fr); padding-top: 24px; }
+  .dash-side { position: static; min-width: 0; }
   .dash-nav { display: flex; overflow-x: auto; border-radius: var(--radius); }
   .dash-nav a { border-bottom: 0; border-right: 1px solid #f1f5f9; white-space: nowrap; }
   .dash-nav a.active { border-left: 0; box-shadow: inset 0 -3px 0 var(--brand-500); }
@@ -441,7 +444,7 @@ li .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand-5
   .kv { grid-template-columns: 1fr; gap: 2px; }
   .kv .k { margin-top: 8px; }
   .hero { padding: 48px 0 44px; }
-  .page { padding: 28px 0 60px; }
+  .page { padding-top: 28px; padding-bottom: 60px; }
   .card-pad { padding: 18px; }
   .footer-grid { grid-template-columns: 1fr; }
   .section-title h2 { font-size: 1.4rem; }

@@ -11,6 +11,7 @@ import {
   addDaysISO, formatMoney, formatTime, isValidTimeZone, nextDays, parseISODate, timeZoneLabel, todayISO
 } from '../utils/format';
 import { loginPath } from '../utils/routes';
+import { isOpenSlot, parseSlots } from '../utils/slots';
 
 const isActive = (x) => x && x.active !== false;
 const DAY_NUMBERS = { MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3, THURSDAY: 4, FRIDAY: 5, SATURDAY: 6, SUNDAY: 7 };
@@ -40,6 +41,7 @@ export default function BookingWizard() {
   const [showCalendar, setShowCalendar] = useState(isWideScreen);
   const [slots, setSlots] = useState(null);
   const [slotsError, setSlotsError] = useState('');
+  const [closedMessage, setClosedMessage] = useState('');
   const [slot, setSlot] = useState(null);
   const [coupon, setCoupon] = useState('');
   const [couponInfo, setCouponInfo] = useState(null);
@@ -85,7 +87,8 @@ export default function BookingWizard() {
   }, [staffOptions, staffId]);
 
   const today = todayISO();
-  const maxDays = (svc?.maxAdvanceBookingDays > 0 ? svc.maxAdvanceBookingDays : provider?.maxAdvanceBookingDays) || 30;
+  const maxDays = (svc?.maxAdvanceBookingDays > 0 ? svc.maxAdvanceBookingDays
+    : provider?.policy?.maxAdvanceBookingDays ?? provider?.maxAdvanceBookingDays) || 30;
   const maxDate = addDaysISO(today, maxDays);
   const days = useMemo(() => nextDays(7, 0), [today]);
   const tz = isValidTimeZone(provider?.timezone) ? provider.timezone : null;
@@ -117,13 +120,17 @@ export default function BookingWizard() {
     const id = ++slotRequest.current;
     setSlot(null);
     setSlotsError('');
+    setClosedMessage('');
     setSlots(null);
     if (!svc || !date) return;
     try {
       const { data } = await api.get('/slots', {
         params: { providerId, serviceId: svc.id, staffId: staffId || undefined, date }
       });
-      if (id === slotRequest.current) setSlots(Array.isArray(data) ? data : []);
+      if (id !== slotRequest.current) return;
+      const parsed = parseSlots(data);
+      setSlots(parsed.slots);
+      setClosedMessage(parsed.message);
     } catch (e) {
       if (id === slotRequest.current) {
         setSlots([]);
@@ -280,7 +287,7 @@ export default function BookingWizard() {
     );
   }
 
-  const available = (slots || []).filter((s) => s.status === 'AVAILABLE');
+  const available = (slots || []).filter(isOpenSlot);
   const showStaff = staffOptions.length > 0;
   const whenStep = showStaff ? 3 : 2;
   const dateLabel = parseISODate(date)?.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' }) || date;
@@ -375,7 +382,7 @@ export default function BookingWizard() {
                     <button type="button" className="btn btn-outline btn-xs" onClick={loadSlots}>Try again</button>
                   </div>
                 ) : available.length === 0 ? (
-                  <p className="muted-line">No available slots for this day. Try another date.</p>
+                  <p className="muted-line">{closedMessage || 'No available slots for this day. Try another date.'}</p>
                 ) : (
                   <div className="slot-grid" role="group" aria-label="Available times">
                     {available.map((s) => {
