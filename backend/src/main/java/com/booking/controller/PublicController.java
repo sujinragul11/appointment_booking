@@ -40,7 +40,7 @@ public class PublicController {
     private final GoogleTokenVerifier googleTokenVerifier;
     private final RazorpayGateway razorpayGateway;
 
-    @Value("${app.name:BookEase}")
+    @Value("${app.name:Sloto}")
     private String appName;
 
     @Value("${app.payments.currency:INR}")

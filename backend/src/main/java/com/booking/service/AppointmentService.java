@@ -167,7 +167,7 @@ public class AppointmentService {
                 .paymentDueAt(online ? clock.instant().plus(Duration.ofMinutes(checkoutTtlMinutes)) : null)
                 .build();
         if (mode == ServiceMode.ONLINE) {
-            a.setMeetingLink(videoBaseUrl.replaceAll("/+$", "") + "/BookEase-" + ref + "-" + BookingUtils.randomString(8));
+            a.setMeetingLink(videoBaseUrl.replaceAll("/+$", "") + "/Sloto-" + ref + "-" + BookingUtils.randomString(8));
         }
         a = appointmentRepository.saveAndFlush(a);
 

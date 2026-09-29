@@ -16,7 +16,7 @@ public class SwaggerConfig {
         String scheme = "bearerAuth";
         return new OpenAPI()
                 .info(new Info()
-                        .title("BookEase - Appointment Booking API")
+                        .title("Sloto - Appointment Booking API")
                         .description("REST API for customers, providers/staff and admins. "
                                 + "Authenticate with POST /api/auth/login and send 'Authorization: Bearer <accessToken>'.")
                         .version("2.0.0"))

@@ -25,10 +25,10 @@ public class EmailSender {
     @Value("${app.mail.enabled:false}")
     private boolean enabled;
 
-    @Value("${app.mail.from:no-reply@bookease.local}")
+    @Value("${app.mail.from:no-reply@sloto.local}")
     private String from;
 
-    @Value("${app.name:BookEase}")
+    @Value("${app.name:Sloto}")
     private String appName;
 
     @Async

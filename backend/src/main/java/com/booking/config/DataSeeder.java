@@ -190,7 +190,7 @@ public class DataSeeder implements CommandLineRunner {
                 .option(PaymentOption.PAY_AT_VENUE).status(PaymentStatus.FAILED).build());
         cancelled.setPaymentStatus(PaymentStatus.FAILED);
 
-        notificationRepository.save(Notification.builder().user(customer).title("Welcome to BookEase")
+        notificationRepository.save(Notification.builder().user(customer).title("Welcome to Sloto")
                 .message("Your account is ready - find a provider and book in a few clicks.").type(NotifType.INFO).link("/providers").build());
 
         log.info("Demo data ready: users={} providers={} services={} (password for all demo accounts is listed in the README)",

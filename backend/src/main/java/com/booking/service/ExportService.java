@@ -40,7 +40,7 @@ public class ExportService {
 
     private final PaymentRepository paymentRepository;
 
-    @Value("${app.name:BookEase}")
+    @Value("${app.name:Sloto}")
     private String appName;
 
     public enum Format { CSV, PDF }

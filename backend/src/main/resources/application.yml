@@ -72,7 +72,7 @@ management:
       enabled: false
 
 app:
-  name: ${APP_NAME:BookEase}
+  name: ${APP_NAME:Sloto}
   # Public URL of the web app, used in e-mail links (password reset, bookings)
   app-url: ${APP_URL:http://localhost:5173}
   cors:
@@ -102,7 +102,7 @@ app:
     password: ${ADMIN_PASSWORD:}
   mail:
     enabled: ${MAIL_ENABLED:false}
-    from: ${MAIL_FROM:no-reply@bookease.local}
+    from: ${MAIL_FROM:no-reply@sloto.local}
   sms:
     # twilio | log
     provider: ${SMS_PROVIDER:log}

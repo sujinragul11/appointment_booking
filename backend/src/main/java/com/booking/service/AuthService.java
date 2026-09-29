@@ -100,14 +100,14 @@ public class AuthService {
                     .category(req.categoryId() == null ? null : categoryRepository.findById(req.categoryId()).orElse(null))
                     .status(ProviderStatus.PENDING)
                     .build());
-            notificationService.inApp(user, "Welcome to BookEase",
+            notificationService.inApp(user, "Welcome to Sloto",
                     "Your business profile was created and is awaiting admin approval. Meanwhile, add your services and working hours.",
                     NotifType.ADMIN, "/dashboard/provider/settings");
             userRepository.findByRoleAndActiveTrueAndDeletedFalse(UserRole.ADMIN).forEach(admin ->
                     notificationService.inApp(admin, "Provider awaiting approval",
                             provider.getBusinessName() + " registered and needs review.", NotifType.ADMIN, "/dashboard/admin/providers"));
         } else {
-            notificationService.inApp(user, "Welcome to BookEase",
+            notificationService.inApp(user, "Welcome to Sloto",
                     "Your account is ready. Verify your e-mail, then find a provider and book in a few clicks.",
                     NotifType.INFO, "/providers");
         }
