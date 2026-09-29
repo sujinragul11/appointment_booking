@@ -1,13 +1,19 @@
 package com.booking.entity;
 
+import com.booking.enums.*;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
-import java.time.LocalTime;
+import java.time.*;
+import java.util.HashSet;
+import java.util.Set;
 
+/** A weekly working window; several windows per day are allowed (FR-14). */
 @Entity
-@Table(name = "availability", uniqueConstraints = {
-        @UniqueConstraint(name = "uk_avail_provider_staff_day", columnNames = {"provider_id", "staff_id", "day_of_week"})
+@Table(name = "availability", indexes = {
+        @Index(name = "idx_avail_provider", columnList = "provider_id")
 })
 @Getter
 @Setter
@@ -24,7 +30,7 @@ public class Availability {
     @JoinColumn(name = "provider_id", nullable = false)
     private Provider provider;
 
-    /** null = provider-level (applies to all staff) */
+    /** null = provider-level (applies to staff without their own hours). */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "staff_id")
     private Staff staff;

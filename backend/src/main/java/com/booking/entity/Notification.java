@@ -1,15 +1,18 @@
 package com.booking.entity;
 
-import com.booking.enums.NotifType;
+import com.booking.enums.*;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
-import java.time.LocalDateTime;
+import java.time.*;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "notifications", indexes = {
-        @Index(name = "idx_notif_user", columnList = "user_id")
+        @Index(name = "idx_notif_user_read", columnList = "user_id, is_read")
 })
 @Getter
 @Setter
@@ -36,6 +39,10 @@ public class Notification {
     @Column(nullable = false, length = 20)
     @Builder.Default
     private NotifType type = NotifType.INFO;
+
+    /** In-app route to open, e.g. /appointments/12. */
+    @Column(length = 200)
+    private String link;
 
     @Column(name = "is_read", nullable = false)
     @Builder.Default

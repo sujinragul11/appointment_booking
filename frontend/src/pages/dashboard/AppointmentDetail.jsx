@@ -1,222 +1,422 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import api from '../../api/client';
-import StatusBadge from '../../components/StatusBadge';
-import Modal from '../../components/Modal';
+import { useCallback, useEffect, useState } from 'react';
+import { useParams, Link, useLocation, useNavigate } from 'react-router-dom';
+import api, { getErrorMessage } from '../../api/client';
+import { downloadIcs, downloadInvoice } from '../../api/site';
+import { useAuth } from '../../context/AuthContext';
+import StatusBadge, { useStatusLabel } from '../../components/StatusBadge';
+import ModeBadge from '../../components/ModeBadge';
+import AccountNav from '../../components/AccountNav';
+import Countdown from '../../components/Countdown';
+import Loader, { InlineLoader } from '../../components/Loader';
 import { useToast } from '../../components/Toast';
-import { formatDateTime, formatTime, formatMoney, downloadText } from '../../utils/format';
-import { nextDays } from '../../utils/format';
-import StarRating from '../../components/StarRating';
-import { getErrorMessage } from '../../api/client';
+import { usePayment } from '../../components/PaymentDialog';
+import { useI18n } from '../../i18n';
+import { formatMoney, isValidTimeZone } from '../../utils/format';
+import { formatInstant, formatStamp, formatWhen, viewerClock } from '../../utils/bookingCalendar';
+import { localDeadline } from '../../utils/countdown';
+import CancelDialog from './appointment/CancelDialog';
+import RescheduleDialog from './appointment/RescheduleDialog';
+import ReviewDialog from './appointment/ReviewDialog';
+import ConfirmDialog from './appointment/ConfirmDialog';
+import { tp } from '../../utils/plural';
 
+const NOTES_MAX = 5000;
+const PAID = ['SUCCESS', 'PARTIALLY_REFUNDED', 'REFUNDED'];
+
+/** Where "Back" goes for each role. */
+export function backPathFor(role) {
+  if (role === 'PROVIDER') return '/dashboard/provider/appointments';
+  if (role === 'STAFF') return '/dashboard/staff';
+  if (role === 'ADMIN') return '/dashboard/admin';
+  return '/dashboard';
+}
+
+/**
+ * One appointment, shared by customers, providers, staff and admins. Which buttons appear is
+ * decided by the server (`actions`), never re-derived here; the server enforces the same rules.
+ */
 export default function AppointmentDetail() {
   const { id } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { t, locale } = useI18n();
+  const statusLabel = useStatusLabel();
   const toast = useToast();
 
   const [appt, setAppt] = useState(null);
-  const [mode, setMode] = useState(null);
-  const [reason, setReason] = useState('');
-  const [days] = useState(() => nextDays(7));
-  const [date, setDate] = useState(days[0]?.iso || '');
-  const [slots, setSlots] = useState([]);
-  const [slot, setSlot] = useState(null);
-  const [review, setReview] = useState({ rating: 5, comment: '' });
-  const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [payDeadline, setPayDeadline] = useState(null);
+  const [notice, setNotice] = useState(location.state?.notice || '');
+  const [dialog, setDialog] = useState(null);
+  const [downloading, setDownloading] = useState('');
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesDraft, setNotesDraft] = useState('');
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [notesError, setNotesError] = useState('');
+  const [statusBusy, setStatusBusy] = useState('');
 
-  const load = () => api.get(`/appointments/${id}`).then((r) => setAppt(r.data)).catch(() => {});
-  useEffect(() => { load(); }, [id]);
+  // A notice handed over by the booking flow is shown once, not again after a reload.
+  useEffect(() => {
+    if (location.state?.notice) navigate(location.pathname, { replace: true, state: null });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openReschedule = () => {
-    setMode('reschedule');
-    setSlots([]);
-    setSlot(null);
-    setDate(days[0]?.iso || '');
+  const apply = useCallback((data, serverDate) => {
+    setAppt(data);
+    setPayDeadline(data?.paymentDueAt ? localDeadline(data.paymentDueAt, serverDate) : null);
+  }, []);
+
+  const load = useCallback(() => api.get(`/appointments/${id}`)
+    .then((r) => { apply(r.data, r.headers?.date); setLoadError(''); })
+    .catch((e) => setLoadError(getErrorMessage(e, t('site.appointment.loadFailed')))), [id, apply, t]);
+  useEffect(() => { load(); }, [load]);
+
+  const payment = usePayment({
+    onPaid: () => { toast(t('site.payment.success'), 'success'); setNotice(''); load(); },
+    onDismiss: () => { setNotice(t('site.payment.reservedNotice')); load(); },
+    onError: (e) => { toast(getErrorMessage(e, t('site.payment.failed')), 'error'); load(); }
+  });
+
+  const updated = (data, message) => {
+    apply(data);
+    setDialog(null);
+    setNotice('');
+    if (message) toast(message, 'success');
   };
 
-  const loadSlots = async () => {
-    setSlots([]);
-    const params = { providerId: appt.providerId, serviceId: appt.serviceId, date };
-    const { data } = await api.get('/slots', { params });
-    setSlots(data.filter((s) => s.status === 'AVAILABLE'));
-  };
-
-  const doCancel = async () => {
-    setBusy(true);
+  const setStatus = async (status) => {
     try {
-      const { data } = await api.put(`/appointments/${id}/cancel`, reason ? { reason } : {});
-      setAppt(data);
-      setMode(null);
-      toast('Appointment cancelled', 'success');
-    } catch (e) { toast(getErrorMessage(e), 'error'); } finally { setBusy(false); }
+      const { data } = await api.put(`/appointments/${id}/status`, { status });
+      updated(data, t(`site.appointment.statusDone.${status}`));
+    } catch (e) {
+      throw new Error(getErrorMessage(e, t('site.common.failed')));
+    }
   };
 
-  const doReschedule = async () => {
-    if (!slot) return;
-    setBusy(true);
+  const confirmBooking = async () => {
+    setStatusBusy('CONFIRMED');
     try {
-      const { data } = await api.put(`/appointments/${id}/reschedule`, {
-        date, startTime: slot.startTime, endTime: slot.endTime
-      });
-      setAppt(data);
-      setMode(null);
-      toast('Appointment rescheduled', 'success');
-    } catch (e) { toast(getErrorMessage(e, 'Could not reschedule'), 'error'); } finally { setBusy(false); }
+      await setStatus('CONFIRMED');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setStatusBusy('');
+    }
   };
 
-  const doReview = async () => {
-    setBusy(true);
+  const saveNotes = async (e) => {
+    e.preventDefault();
+    if (!notesDraft.trim()) {
+      setNotesError(t('site.appointment.notesRequired'));
+      return;
+    }
+    setNotesBusy(true);
+    setNotesError('');
     try {
-      await api.post('/reviews', { appointmentId: Number(id), rating: Number(review.rating), comment: review.comment });
-      setMode(null);
-      toast('Thanks for your review!', 'success');
-      load();
-    } catch (e) { toast(getErrorMessage(e), 'error'); } finally { setBusy(false); }
+      const { data } = await api.put(`/appointments/${id}/notes`, { providerNotes: notesDraft.trim() });
+      apply(data);
+      setNotesOpen(false);
+      toast(t('site.appointment.notesSaved'), 'success');
+    } catch (err) {
+      setNotesError(getErrorMessage(err, t('site.common.failed')));
+    } finally {
+      setNotesBusy(false);
+    }
   };
 
-  const payNow = async () => {
-    setBusy(true);
+  const download = async (kind) => {
+    setDownloading(kind);
     try {
-      const order = (await api.post('/payments/create-order', null, { params: { appointmentId: Number(id) } })).data;
-      await api.post('/payments/verify', {
-        appointmentId: Number(id), method: 'RAZORPAY', orderId: order.orderId,
-        razorpayPaymentId: 'pay_demo_' + Date.now()
-      });
-      toast('Payment successful! Appointment confirmed.', 'success');
-      load();
-    } catch (e) { toast(getErrorMessage(e, 'Payment failed'), 'error'); } finally { setBusy(false); }
+      if (kind === 'ics') await downloadIcs(appt.id, appt.bookingRef);
+      else await downloadInvoice(appt.id, appt.bookingRef);
+    } catch (e) {
+      toast(getErrorMessage(e, t('site.appointment.downloadFailed')), 'error');
+    } finally {
+      setDownloading('');
+    }
   };
 
-  if (!appt) return <div className="loader-screen"><div className="loader-box">Loading appointment...</div></div>;
+  const role = user?.role;
+  const back = backPathFor(role);
 
-  const isUpcoming = ['CONFIRMED', 'PENDING'].includes(appt.status);
+  if (!appt) {
+    return (
+      <div className="dash">
+        <AccountNav />
+        <div className="dash-main">
+          {loadError ? (
+            <div className="empty card card-pad">
+              <h1 className="empty-title">{t('site.appointment.unavailable')}</h1>
+              <p className="mt-1" role="alert">{loadError}</p>
+              <div className="btn-row center-row mt-3">
+                <button type="button" className="btn btn-primary btn-sm" onClick={load}>{t('common.retry')}</button>
+                <Link className="btn btn-outline btn-sm" to={back}>{t('site.appointment.back')}</Link>
+              </div>
+            </div>
+          ) : (
+            <Loader label={t('common.loading')} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const a = appt.actions || {};
+  const business = role === 'PROVIDER' || role === 'STAFF';
+  const isCustomer = role === 'CUSTOMER';
+  const tz = isValidTimeZone(appt.timezone) ? appt.timezone : null;
+  const local = viewerClock(appt.startAt, tz, locale);
+  const pay = appt.payment || {};
+  const paidAmount = PAID.includes(pay.status) ? Number(pay.amount || 0) : 0;
+  const cancelled = appt.status === 'CANCELLED';
+  const active = ['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(appt.status);
+  const showCancel = a.canCancel && !(business && a.canReject);
+  const hasActions = a.canPay || a.canConfirm || a.canReject || showCancel || a.canReschedule || a.canComplete || a.canMarkNoShow || a.canReview;
 
   return (
     <div className="dash">
-      <aside className="dash-side">
-        <nav className="dash-nav">
-          <Link to="/dashboard">My bookings</Link>
-          <Link to="/profile">Profile</Link>
-          <Link to="/addresses">Addresses</Link>
-          <Link to="/notifications">Notifications</Link>
-        </nav>
-      </aside>
+      <AccountNav />
 
-      <div>
-        <Link to="/dashboard" className="link-more" style={{ fontSize: '0.9rem' }}>&larr; Back</Link>
+      <div className="dash-main">
+        <Link to={back} className="link-more back-link"><span aria-hidden="true">&larr;</span> {t('site.appointment.back')}</Link>
 
-        <div className="card card-pad mt-2">
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>{appt.serviceName}</h1>
-                <StatusBadge status={appt.status} />
-              </div>
-              <p style={{ color: 'var(--muted)', marginTop: 2 }}>{appt.bookingRef} {'\u2022'} {appt.providerName}</p>
-            </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {isUpcoming && appt.status !== 'PENDING' && (
-                <>
-                  <button className="btn btn-outline btn-sm" onClick={openReschedule}>Reschedule</button>
-                  <button className="btn btn-danger btn-sm" onClick={() => setMode('cancel')}>Cancel</button>
-                </>
-              )}
-              {appt.status === 'PENDING' && (
-                <button className="btn btn-primary btn-sm" disabled={busy} onClick={payNow}>Pay now</button>
-              )}
-              {appt.status === 'COMPLETED' && appt.payment?.status === 'SUCCESS' && appt.payment?.method !== 'PAY_AT_VENUE' && (
-                <button className="btn btn-outline btn-sm" onClick={() => api.post(`/payments/${id}/refund`).then((r) => toast(r.data.message, 'success')).catch((e) => toast(getErrorMessage(e), 'error'))}>Request refund</button>
-              )}
-            </div>
-          </div>
-
-          <div className="divider-h" />
-          <div className="kv">
-            <span className="k">Date &amp; time</span>
-            <span>{appt.date} {'\u2022'} {formatTime(appt.startTime)} - {formatTime(appt.endTime)}</span>
-            <span className="k">Staff</span><span>{appt.staffName || 'Any available member'}</span>
-            <span className="k">Notes</span><span>{appt.notes || '\u2014'}</span>
-            <span className="k">Amount</span>
-            <span>{formatMoney(appt.amount)}{appt.discount > 0 ? ` (discount ${formatMoney(appt.discount)}${appt.couponCode ? ` with ${appt.couponCode}` : ''})` : ''}</span>
-            <span className="k">Total paid</span><strong>{formatMoney(appt.finalAmount)}</strong>
-            <span className="k">Payment</span>
-            <span><StatusBadge status={appt.payment?.method} /> {'\u2022'} <StatusBadge status={appt.payment?.status} /></span>
-            {appt.payment?.txnId && <><span className="k">Txn ID</span><span>{appt.payment.txnId}</span></>}
-            {appt.payment?.refundId && <><span className="k">Refund ID</span><span>{appt.payment.refundId}</span></>}
-            {appt.cancelReason && <><span className="k">Cancel reason</span><span>{appt.cancelReason}</span></>}
-            <span className="k">Booked on</span><span>{formatDateTime(appt.createdAt)}</span>
-          </div>
-
-          <div className="mt-3" style={{ display: 'flex', gap: 10 }}>
-            <button className="btn btn-outline btn-sm" onClick={() => api.get(`/appointments/${appt.id}/ics`, { responseType: 'text' })
-              .then((r) => downloadText(`appointment-${appt.id}.ics`, typeof r.data === 'string' ? r.data : JSON.stringify(r.data))).catch(() => {})}>
-              Add to calendar
+        {notice && (
+          <div className="form-note mt-2" role="status">
+            <span aria-hidden="true">{'ℹ'}</span>
+            <span className="grow">{notice}</span>
+            <button type="button" className="note-x" onClick={() => setNotice('')} aria-label={t('common.dismiss')}>
+              <span aria-hidden="true">&#10005;</span>
             </button>
-            {appt.status === 'COMPLETED' && (
-              <button className="btn btn-primary btn-sm" onClick={() => { setMode('review'); setReview({ rating: 5, comment: '' }); }}>
-                Write a review
-              </button>
+          </div>
+        )}
+
+        <header className="card card-pad mt-2 appt-head">
+          <p className="eyebrow">{t('site.appointment.reference')}: <strong className="break-all">{appt.bookingRef}</strong></p>
+          <h1 className="appt-title">{appt.serviceName}</h1>
+          <p className="appt-sub">
+            <Link to={`/providers/${appt.providerId}`}>{appt.providerName}</Link>
+            {appt.staffName ? ` · ${t('site.appointment.withStaff', { name: appt.staffName })}` : ''}
+          </p>
+          <div className="badge-row">
+            <StatusBadge status={appt.status} />
+            <ModeBadge mode={appt.mode} />
+            {(appt.paymentStatus || pay.status) && (
+              <span className="badge-line">{t('site.appointment.paymentShort')}: <StatusBadge status={appt.paymentStatus || pay.status} /></span>
             )}
           </div>
+          <p className="appt-when">{formatWhen(appt, locale)}</p>
+          {local && <p className="tz-note">{t('site.slots.yourTime', { time: local })}</p>}
+
+          {a.canPay && (
+            <div className="pay-due mt-2">
+              <p>
+                {t('site.appointment.payDue', { amount: formatMoney(pay.amount || appt.finalAmount) })}{' '}
+                {payDeadline && (
+                  <Countdown deadline={payDeadline} onExpire={() => load()}
+                    announce={(m) => tp(t, 'site.payment.minutesLeft', { count: m })} expiredText={t('site.payment.expired')} />
+                )}
+              </p>
+            </div>
+          )}
+
+          {hasActions && (
+            <div className="btn-row mt-3" role="group" aria-label={t('site.appointment.actions')}>
+              {a.canPay && (
+                <button type="button" className="btn btn-primary btn-sm" disabled={payment.busy} onClick={() => payment.start(appt.id)}>
+                  {payment.busy ? <InlineLoader label={t('site.payment.processing')} /> : t('site.appointment.payNow')}
+                </button>
+              )}
+              {a.canConfirm && (
+                <button type="button" className="btn btn-success btn-sm" disabled={statusBusy === 'CONFIRMED'} onClick={confirmBooking}>
+                  {statusBusy === 'CONFIRMED' ? <InlineLoader label={t('site.common.working')} /> : t('site.appointment.confirm')}
+                </button>
+              )}
+              {a.canComplete && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => setDialog('complete')}>{t('site.appointment.complete')}</button>
+              )}
+              {a.canMarkNoShow && (
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setDialog('noshow')}>{t('site.appointment.noShow')}</button>
+              )}
+              {a.canReschedule && (
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setDialog('reschedule')}>{t('site.appointment.reschedule')}</button>
+              )}
+              {a.canReject && business && (
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => setDialog('reject')}>{t('site.appointment.reject')}</button>
+              )}
+              {showCancel && (
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => setDialog('cancel')}>{t('site.appointment.cancel')}</button>
+              )}
+              {a.canReview && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => setDialog('review')}>{t('site.appointment.review')}</button>
+              )}
+            </div>
+          )}
+          {isCustomer && appt.reviewed && <p className="form-success mt-2">{t('site.appointment.reviewed')}</p>}
+        </header>
+
+        <div className="appt-grid mt-3">
+          <section className="card card-pad" aria-labelledby="appt-details">
+            <h2 id="appt-details" className="section-h">{t('site.appointment.details')}</h2>
+            <dl className="kv">
+              <dt className="k">{t('site.booking.when')}</dt>
+              <dd>{formatWhen(appt, locale)}{tz && <span className="tz-note block">{tz}</span>}</dd>
+              <dt className="k">{t('site.booking.duration')}</dt><dd>{t('site.services.duration', { min: appt.durationMin })}</dd>
+              <dt className="k">{t('site.booking.staff')}</dt><dd>{appt.staffName || t('site.appointment.anyStaff')}</dd>
+              <dt className="k">{t('site.booking.format')}</dt><dd><ModeBadge mode={appt.mode} /></dd>
+              {appt.mode === 'ONLINE' && (
+                <>
+                  <dt className="k">{t('site.appointment.meeting')}</dt>
+                  <dd>
+                    {appt.meetingLink && !cancelled ? (
+                      <a href={appt.meetingLink} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-xs">
+                        {t('site.appointment.joinMeeting')}<span className="sr-only"> {t('site.common.opensNewTab')}</span>
+                      </a>
+                    ) : '—'}
+                    {appt.meetingLink && !cancelled && <span className="hint block break-all">{appt.meetingLink}</span>}
+                  </dd>
+                </>
+              )}
+              {appt.mode !== 'ONLINE' && appt.providerAddress && (
+                <><dt className="k">{t('site.appointment.location')}</dt><dd>{appt.providerAddress}</dd></>
+              )}
+              {appt.providerPhone && (
+                <><dt className="k">{t('site.appointment.providerPhone')}</dt><dd><a href={`tel:${appt.providerPhone}`}>{appt.providerPhone}</a></dd></>
+              )}
+              {!isCustomer && (
+                <>
+                  <dt className="k">{t('site.appointment.customer')}</dt>
+                  <dd>
+                    {appt.customerName}
+                    {appt.customerEmail && <span className="block"><a href={`mailto:${appt.customerEmail}`} className="break-all">{appt.customerEmail}</a></span>}
+                    {appt.customerPhone && <span className="block"><a href={`tel:${appt.customerPhone}`}>{appt.customerPhone}</a></span>}
+                  </dd>
+                </>
+              )}
+              <dt className="k">{t('site.appointment.customerNotes')}</dt><dd className="pre-wrap">{appt.notes || '—'}</dd>
+              {appt.rescheduleCount > 0 && (
+                <><dt className="k">{t('site.appointment.rescheduled')}</dt><dd>{tp(t, 'site.appointment.rescheduledTimes', { count: appt.rescheduleCount })}</dd></>
+              )}
+              <dt className="k">{t('site.appointment.bookedOn')}</dt><dd>{formatStamp(appt.createdAt, locale)}</dd>
+            </dl>
+          </section>
+
+          <section className="card card-pad" aria-labelledby="appt-payment">
+            <h2 id="appt-payment" className="section-h">{t('site.appointment.payment')}</h2>
+            <dl className="kv">
+              <dt className="k">{t('site.appointment.method')}</dt><dd>{pay.method ? statusLabel(pay.method) : '—'}</dd>
+              {pay.option && <><dt className="k">{t('site.appointment.option')}</dt><dd>{t(`site.payOption.${pay.option}`)}</dd></>}
+              <dt className="k">{t('site.appointment.status')}</dt><dd><StatusBadge status={appt.paymentStatus || pay.status} /></dd>
+              <dt className="k">{t('site.booking.price')}</dt><dd>{formatMoney(appt.amount)}</dd>
+              {appt.discount > 0 && (
+                <><dt className="k">{t('site.booking.discount', { code: appt.couponCode || '' })}</dt><dd className="success-text">−{formatMoney(appt.discount)}</dd></>
+              )}
+              <dt className="k">{t('site.booking.total')}</dt><dd><strong>{formatMoney(appt.finalAmount)}</strong></dd>
+              <dt className="k">{t('site.appointment.paid')}</dt><dd>{formatMoney(paidAmount)}{pay.paidAt ? ` · ${formatStamp(pay.paidAt, locale)}` : ''}</dd>
+              {pay.balanceDue > 0 && !cancelled && (
+                <><dt className="k">{t('site.appointment.balanceDue')}</dt><dd>{formatMoney(pay.balanceDue)}</dd></>
+              )}
+              {pay.refundAmount > 0 && (
+                <>
+                  <dt className="k">{t('site.appointment.refunded')}</dt>
+                  <dd>
+                    {formatMoney(pay.refundAmount)}{pay.refundedAt ? ` · ${formatStamp(pay.refundedAt, locale)}` : ''}
+                    {pay.refundId && <span className="hint block break-all">{t('site.appointment.refundId', { id: pay.refundId })}</span>}
+                  </dd>
+                </>
+              )}
+              {pay.invoiceNumber && <><dt className="k">{t('site.appointment.invoiceNo')}</dt><dd className="break-all">{pay.invoiceNumber}</dd></>}
+              {pay.transactionId && <><dt className="k">{t('site.appointment.txn')}</dt><dd className="break-all">{pay.transactionId}</dd></>}
+            </dl>
+            <div className="btn-row mt-2">
+              {pay.invoiceNumber && (
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => download('invoice')} disabled={downloading === 'invoice'}>
+                  {downloading === 'invoice' ? <InlineLoader label={t('site.appointment.downloading')} /> : t('site.appointment.invoice')}
+                </button>
+              )}
+              {active && (
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => download('ics')} disabled={downloading === 'ics'}>
+                  {downloading === 'ics' ? <InlineLoader label={t('site.appointment.downloading')} /> : t('site.appointment.addToCalendar')}
+                </button>
+              )}
+            </div>
+          </section>
+
+          {(appt.providerNotes || a.canAddNotes) && (
+            <section className="card card-pad appt-notes" aria-labelledby="appt-provider-notes">
+              <h2 id="appt-provider-notes" className="section-h">{t('site.appointment.providerNotes')}</h2>
+              {notesOpen ? (
+                <form onSubmit={saveNotes}>
+                  <div className="field">
+                    <label htmlFor="provider-notes">{t('site.appointment.notesLabel')}</label>
+                    <textarea id="provider-notes" rows={6} maxLength={NOTES_MAX} value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)}
+                      aria-describedby="provider-notes-hint" aria-invalid={Boolean(notesError) || undefined} />
+                    <span className="hint" id="provider-notes-hint">{t('site.appointment.notesHint')} {tp(t, 'site.common.charsLeft', { count: NOTES_MAX - notesDraft.length })}</span>
+                  </div>
+                  {notesError && <div className="form-error" role="alert">{notesError}</div>}
+                  <div className="btn-row">
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={notesBusy}>
+                      {notesBusy ? <InlineLoader label={t('site.common.saving')} /> : t('site.appointment.saveNotes')}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotesOpen(false)} disabled={notesBusy}>{t('common.cancel')}</button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <p className="pre-wrap">{appt.providerNotes || <span className="muted">{t('site.appointment.noNotes')}</span>}</p>
+                  {a.canAddNotes && (
+                    <button type="button" className="btn btn-outline btn-sm mt-2"
+                      onClick={() => { setNotesDraft(appt.providerNotes || ''); setNotesError(''); setNotesOpen(true); }}>
+                      {appt.providerNotes ? t('site.appointment.editNotes') : t('site.appointment.addNotes')}
+                    </button>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
+          {cancelled && (
+            <section className="card card-pad" aria-labelledby="appt-cancel">
+              <h2 id="appt-cancel" className="section-h">{t('site.appointment.cancellation')}</h2>
+              <dl className="kv">
+                <dt className="k">{t('site.appointment.cancelledBy')}</dt>
+                <dd>{appt.cancelledBy ? t(`site.actor.${appt.cancelledBy}`) : '—'}</dd>
+                <dt className="k">{t('site.appointment.cancelReason')}</dt><dd className="pre-wrap">{appt.cancelReason || '—'}</dd>
+                <dt className="k">{t('site.appointment.cancelledAt')}</dt><dd>{appt.cancelledAt ? formatInstant(appt.cancelledAt, locale) : '—'}</dd>
+              </dl>
+            </section>
+          )}
         </div>
       </div>
 
-      {mode === 'cancel' && (
-        <Modal title="Cancel appointment" onClose={() => setMode(null)}>
-          <div className="field">
-            <label>Reason (optional)</label>
-            <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Tell the provider why you're cancelling" />
-          </div>
-          <button className="btn btn-danger btn-block" disabled={busy} onClick={doCancel}>
-            {busy ? 'Cancelling...' : `Cancel booking ${appt.bookingRef}`}
-          </button>
-        </Modal>
+      {dialog === 'cancel' && (
+        <CancelDialog appt={appt} actor={business ? 'BUSINESS' : role === 'ADMIN' ? 'ADMIN' : 'CUSTOMER'}
+          onClose={() => setDialog(null)} onDone={(data) => updated(data, t('site.cancel.done'))} />
       )}
-
-      {mode === 'reschedule' && (
-        <Modal title="Reschedule appointment" onClose={() => setMode(null)}>
-          <div className="field">
-            <label>New date</label>
-            <select value={date} onChange={async (e) => { setDate(e.target.value); setSlots([]); setSlot(null); }}>
-              {days.map((d) => <option key={d.iso} value={d.iso}>{d.dow}, {d.day} {d.month}</option>)}
-            </select>
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={loadSlots}>Show slots</button>
-          {slots.length > 0 && (
-            <div className="slot-grid mt-2">
-              {slots.map((s) => (
-                <button key={s.id} className={`slot-btn ${slot?.id === s.id ? 'selected' : ''}`} onClick={() => setSlot(s)}>
-                  {formatTime(s.startTime)}
-                </button>
-              ))}
-            </div>
-          )}
-          <button className="btn btn-primary btn-block mt-3" disabled={!slot || busy} onClick={doReschedule}>
-            {busy ? 'Rescheduling...' : 'Confirm new time'}
-          </button>
-        </Modal>
+      {dialog === 'reject' && (
+        <CancelDialog appt={appt} actor="BUSINESS" reject onClose={() => setDialog(null)}
+          onDone={(data) => updated(data, t('site.cancel.rejected'))} />
       )}
-
-      {mode === 'review' && (
-        <Modal title="Leave a review" onClose={() => setMode(null)}>
-          <div className="field">
-            <label>Rating</label>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button" onClick={() => setReview({ ...review, rating: n })}
-                  style={{ fontSize: '1.8rem', background: 'none', border: 0, color: n <= review.rating ? '#f59e0b' : '#e2e8f0', cursor: 'pointer' }}>{'\u2605'}</button>
-              ))}
-            </div>
-          </div>
-          <div className="field">
-            <label>Comment</label>
-            <textarea rows={3} value={review.comment} onChange={(e) => setReview({ ...review, comment: e.target.value })} placeholder="How was your experience?" />
-          </div>
-          <button className="btn btn-primary btn-block" disabled={busy} onClick={doReview}>
-            {busy ? 'Submitting...' : 'Submit review'}
-          </button>
-        </Modal>
+      {dialog === 'reschedule' && (
+        <RescheduleDialog appt={appt} isCustomer={isCustomer} onClose={() => setDialog(null)}
+          onDone={(data) => updated(data, t('site.reschedule.done'))} />
       )}
+      {dialog === 'review' && (
+        <ReviewDialog appt={appt} onClose={() => setDialog(null)}
+          onDone={(review) => {
+            setDialog(null);
+            toast(review?.status === 'PENDING' ? t('site.review.thanksModerated') : t('site.review.thanks'), 'success');
+            load();
+          }} />
+      )}
+      {dialog === 'complete' && (
+        <ConfirmDialog title={t('site.appointment.completeTitle')} text={t('site.appointment.completeText')}
+          confirmLabel={t('site.appointment.complete')} onConfirm={() => setStatus('COMPLETED')} onClose={() => setDialog(null)} />
+      )}
+      {dialog === 'noshow' && (
+        <ConfirmDialog title={t('site.appointment.noShowTitle')} text={t('site.appointment.noShowText')} danger
+          confirmLabel={t('site.appointment.noShow')} onConfirm={() => setStatus('NO_SHOW')} onClose={() => setDialog(null)} />
+      )}
+      {payment.dialog}
     </div>
   );
 }

@@ -1,36 +1,58 @@
+import { useT } from '../i18n';
+
 const styles = {
-  CONFIRMED: ['badge-green', '\u2713'],
-  PENDING: ['badge-amber', '\u25CB'],
+  CONFIRMED: ['badge-green', '✓'],
+  PENDING: ['badge-amber', '○'],
   IN_PROGRESS: ['badge-blue', ''],
-  COMPLETED: ['badge-primary', '\u2713'],
-  CANCELLED: ['badge-red', '\u2715'],
+  COMPLETED: ['badge-primary', '✓'],
+  CANCELLED: ['badge-red', '✕'],
   NO_SHOW: ['badge-red', ''],
-  RESCHEDULED: ['badge-gray', '\u21BB'],
-  PAID: ['badge-green', '\u2713'],
-  SUCCESS: ['badge-green', '\u2713'],
-  REFUNDED: ['badge-amber', '\u21B6'],
-  FAILED: ['badge-red', '\u2715'],
-  PENDING_PAYMENT: ['badge-amber', '\u25CB'],
-  PAY_AT_VENUE: ['badge-blue', '\u24C9'],
-  ONLINE: ['badge-primary', '\u24D1'],
-  VERIFIED: ['badge-green', '\u2713'],
-  PENDING_APPROVAL: ['badge-amber', '\u25CB'],
-  REJECTED: ['badge-red', '\u2715'],
+  RESCHEDULED: ['badge-gray', '↻'],
+  PAID: ['badge-green', '✓'],
+  SUCCESS: ['badge-green', '✓'],
+  REFUNDED: ['badge-amber', '↶'],
+  FAILED: ['badge-red', '✕'],
+  PENDING_PAYMENT: ['badge-amber', '○'],
+  PAY_AT_VENUE: ['badge-blue', 'Ⓣ'],
+  ONLINE: ['badge-primary', 'ⓑ'],
+  VERIFIED: ['badge-green', '✓'],
+  PENDING_APPROVAL: ['badge-amber', '○'],
+  REJECTED: ['badge-red', '✕'],
   SUSPENDED: ['badge-red', ''],
-  UNAVAILABLE: ['badge-red', '\u2715'],
-  BOOKED: ['badge-blue', '\u25CB'],
-  AVAILABLE: ['badge-green', '\u2713'],
-  FLAT: ['badge-gray', '\u20B9'],
+  UNAVAILABLE: ['badge-red', '✕'],
+  BOOKED: ['badge-blue', '○'],
+  AVAILABLE: ['badge-green', '✓'],
+  FLAT: ['badge-gray', '₹'],
   PERCENT: ['badge-primary', '%']
 };
 
+/** Translated label for a status code; unknown codes are shown as-is ("SOME_CODE" -> "SOME CODE"). */
+export function useStatusLabel() {
+  const t = useT();
+  return (status) => {
+    if (!status) return '';
+    const key = `status.${status}`;
+    const label = t(key);
+    return label === key ? String(status).replace(/_/g, ' ') : label;
+  };
+}
+
 export default function StatusBadge({ status }) {
+  const statusLabel = useStatusLabel();
   const [cls, glyph] = styles[status] || ['badge-gray', ''];
-  const label = String(status || '').replace(/_/g, ' ');
-  return <span className={`badge ${cls}`}>{glyph ? glyph + ' ' : ''}{label}</span>;
+  return (
+    <span className={`badge ${cls}`}>
+      {glyph ? <span aria-hidden="true">{glyph} </span> : null}{statusLabel(status)}
+    </span>
+  );
 }
 
 export function TypeBadge({ type }) {
+  const statusLabel = useStatusLabel();
   const [cls, glyph] = styles[type] || ['badge-gray', ''];
-  return <span className={`badge ${cls}`}>{glyph && glyph + ' '}{String(type || '').replace(/_/g, ' ')}</span>;
+  return (
+    <span className={`badge ${cls}`}>
+      {glyph ? <span aria-hidden="true">{glyph} </span> : null}{statusLabel(type)}
+    </span>
+  );
 }

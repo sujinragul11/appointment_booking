@@ -1,89 +1,116 @@
 package com.booking.controller;
 
-import com.booking.dto.request.AppointmentRequest;
-import com.booking.dto.request.CancelRequest;
-import com.booking.dto.request.RescheduleRequest;
-import com.booking.dto.request.StatusUpdateRequest;
-import com.booking.dto.response.AppointmentResponse;
+import com.booking.dto.request.*;
+import com.booking.dto.response.*;
 import com.booking.service.AppointmentService;
-import com.booking.service.PaymentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/appointments")
 @RequiredArgsConstructor
 @Tag(name = "Appointments")
 public class AppointmentController {
 
     private final AppointmentService appointmentService;
-    private final PaymentService paymentService;
 
-    @PostMapping
-    @Operation(summary = "Book an appointment (CUSTOMER)")
+    @PostMapping("/api/slots/hold")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @Operation(summary = "Lock a slot for 10 minutes during checkout")
+    public SlotHoldResponse hold(@Valid @RequestBody SlotHoldRequest request) {
+        return appointmentService.hold(request);
+    }
+
+    @DeleteMapping("/api/slots/hold/{token}")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    public ResponseEntity<Void> releaseHold(@PathVariable String token) {
+        appointmentService.releaseHold(token);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/appointments")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @Operation(summary = "Book an appointment (FR-21..26). Race-safe: the slot is re-checked under a lock")
     public AppointmentResponse create(@Valid @RequestBody AppointmentRequest request) {
         return appointmentService.create(request);
     }
 
-    @GetMapping("/my")
-    @Operation(summary = "My appointments (customer)")
-    public List<AppointmentResponse> mine() {
-        return appointmentService.listMine();
+    @GetMapping("/api/appointments/my")
+    @Operation(summary = "My appointments; scope = upcoming | past | cancelled | all (FR-27)")
+    public List<AppointmentResponse> mine(@RequestParam(defaultValue = "all") String scope) {
+        return appointmentService.mine(scope);
     }
 
-    @GetMapping("/provider")
-    @Operation(summary = "Provider's appointments")
-    public List<AppointmentResponse> provider() {
-        return appointmentService.listForProvider();
-    }
-
-    @GetMapping("/provider/today")
-    @Operation(summary = "Provider's appointments for a date")
-    public List<AppointmentResponse> providerOnDate(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return appointmentService.listForProviderOnDate(date);
-    }
-
-    @GetMapping("/{id}")
+    @GetMapping("/api/appointments/{id}")
     public AppointmentResponse get(@PathVariable Long id) {
         return appointmentService.get(id);
     }
 
-    @PutMapping("/{id}/reschedule")
-    @Operation(summary = "Reschedule appointment (customer)")
+    @GetMapping("/api/appointments/ref/{ref}")
+    public AppointmentResponse byRef(@PathVariable String ref) {
+        return appointmentService.getByRef(ref);
+    }
+
+    @RequestMapping(value = {"/api/appointments/{id}", "/api/appointments/{id}/reschedule"},
+            method = {RequestMethod.PATCH, RequestMethod.PUT})
+    @Operation(summary = "Reschedule (FR-28): subject to cut-off and maximum reschedules")
     public AppointmentResponse reschedule(@PathVariable Long id, @Valid @RequestBody RescheduleRequest request) {
         return appointmentService.reschedule(id, request);
     }
 
-    @PutMapping("/{id}/cancel")
-    @Operation(summary = "Cancel appointment (customer)")
-    public AppointmentResponse cancel(@PathVariable Long id, @RequestBody(required = false) CancelRequest request) {
-        return appointmentService.cancel(id, request, false);
+    @GetMapping("/api/appointments/{id}/cancellation-preview")
+    @Operation(summary = "Policy check before cancelling: allowed? refund amount?")
+    public CancellationPreviewResponse cancellationPreview(@PathVariable Long id) {
+        return appointmentService.cancellationPreview(id);
     }
 
-    @PutMapping("/{id}/status")
-    @Operation(summary = "Update appointment status (provider): CONFIRMED/IN_PROGRESS/COMPLETED/NO_SHOW")
+    @DeleteMapping("/api/appointments/{id}")
+    @Operation(summary = "Cancel with reason; refund per policy (FR-29, FR-39)")
+    public AppointmentResponse cancelDelete(@PathVariable Long id, @Valid @RequestBody(required = false) CancelRequest request,
+                                            @RequestParam(required = false) String reason) {
+        return appointmentService.cancel(id, request != null ? request : new CancelRequest(reason));
+    }
+
+    @PutMapping("/api/appointments/{id}/cancel")
+    public AppointmentResponse cancel(@PathVariable Long id, @Valid @RequestBody(required = false) CancelRequest request) {
+        return appointmentService.cancel(id, request);
+    }
+
+    @PutMapping("/api/appointments/{id}/status")
+    @Operation(summary = "Provider/staff: CONFIRMED, CANCELLED (reject, needs reason), COMPLETED, NO_SHOW (FR-30, FR-31)")
     public AppointmentResponse status(@PathVariable Long id, @Valid @RequestBody StatusUpdateRequest request) {
         return appointmentService.updateStatus(id, request);
     }
 
-    @GetMapping("/{id}/ics")
-    @Operation(summary = "Download .ics calendar invite")
+    @PutMapping("/api/appointments/{id}/notes")
+    @Operation(summary = "Provider/staff: post-appointment notes or prescription (FR-32)")
+    public AppointmentResponse notes(@PathVariable Long id, @Valid @RequestBody ProviderNotesRequest request) {
+        return appointmentService.addProviderNotes(id, request);
+    }
+
+    @GetMapping("/api/appointments/{id}/ics")
+    @Operation(summary = "Download a calendar invite")
     public ResponseEntity<String> ics(@PathVariable Long id) {
-        String ics = appointmentService.getIcs(id);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=appointment-" + id + ".ics")
                 .contentType(MediaType.parseMediaType("text/calendar; charset=utf-8"))
-                .body(ics);
+                .body(appointmentService.ics(id));
+    }
+
+    @GetMapping("/api/appointments/{id}/invoice")
+    @Operation(summary = "Download the invoice PDF (FR-40)")
+    public ResponseEntity<byte[]> invoice(@PathVariable Long id) {
+        var invoice = appointmentService.invoice(id);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + invoice.filename())
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(invoice.pdf());
     }
 }

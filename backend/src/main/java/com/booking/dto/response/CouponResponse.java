@@ -1,9 +1,8 @@
 package com.booking.dto.response;
 
-import com.booking.enums.DiscountType;
+import com.booking.enums.*;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.*;
 import java.util.List;
 
 public record CouponResponse(
@@ -17,6 +16,7 @@ public record CouponResponse(
         LocalDate validTo,
         int usageLimit,
         int usedCount,
+        int perUserLimit,
         boolean active,
         LocalDateTime createdAt
 ) {}

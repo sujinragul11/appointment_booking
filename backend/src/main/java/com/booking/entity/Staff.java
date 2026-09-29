@@ -1,8 +1,12 @@
 package com.booking.entity;
 
+import com.booking.enums.*;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.*;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -24,6 +28,11 @@ public class Staff {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "provider_id", nullable = false)
     private Provider provider;
+
+    /** Optional login account (role STAFF) so the staff member manages their own schedule. */
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", unique = true)
+    private User user;
 
     @Column(nullable = false, length = 120)
     private String name;

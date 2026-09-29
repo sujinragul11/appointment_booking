@@ -1,8 +1,12 @@
 package com.booking.entity;
 
+import com.booking.enums.*;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.*;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -25,10 +29,9 @@ public class Category {
     @Column(length = 100)
     private String icon;
 
-    @Column(length = 120)
+    @Column(nullable = false, unique = true, length = 120)
     private String slug;
 
-    @OneToMany(mappedBy = "category")
-    @Builder.Default
-    private Set<Provider> providers = new HashSet<>();
+    @Column(length = 255)
+    private String description;
 }

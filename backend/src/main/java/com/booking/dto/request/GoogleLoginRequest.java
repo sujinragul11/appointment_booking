@@ -1,11 +1,13 @@
 package com.booking.dto.request;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
+import com.booking.enums.*;
+import com.booking.validation.StrongPassword;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 
-public record GoogleLoginRequest(
-        @NotBlank @Email String email,
-        @NotBlank String name,
-        @NotBlank String googleId,
-        String photoUrl
-) {}
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+
+/** idToken is the credential returned by Google Identity Services. */
+public record GoogleLoginRequest(@NotBlank String idToken) {}

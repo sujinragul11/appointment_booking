@@ -1,24 +1,28 @@
 package com.booking.service;
 
-import com.booking.dto.request.AdminProviderDecision;
-import com.booking.dto.request.CategoryRequest;
-import com.booking.dto.response.*;
-import com.booking.entity.Category;
-import com.booking.entity.Provider;
+import com.booking.dto.response.PageResponse;
+import com.booking.dto.response.StatsResponse;
+import com.booking.dto.response.UserResponse;
 import com.booking.entity.User;
-import com.booking.enums.ProviderStatus;
-import com.booking.enums.UserRole;
+import com.booking.enums.*;
 import com.booking.exception.ApiException;
+import com.booking.mapper.DtoMapper;
 import com.booking.repository.*;
+import com.booking.security.SecurityUtils;
+import com.booking.util.BookingUtils;
+import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
+/** User management and platform statistics for admins (FR-44). */
 @Service
 @RequiredArgsConstructor
 public class AdminService {
@@ -26,94 +30,94 @@ public class AdminService {
     private final UserRepository userRepository;
     private final ProviderRepository providerRepository;
     private final AppointmentRepository appointmentRepository;
+    private final PaymentRepository paymentRepository;
     private final ReviewRepository reviewRepository;
-    private final SlotRepository slotRepository;
-    private final CategoryRepository categoryRepository;
+    private final StaffRepository staffRepository;
+    private final AuditService auditService;
+    private final DtoMapper mapper;
 
+    @Transactional(readOnly = true)
     public StatsResponse stats() {
+        double revenue = paymentRepository.netCollected();
         return new StatsResponse(
-                userRepository.count(),
-                userRepository.countByRole(UserRole.CUSTOMER),
-                userRepository.countByRole(UserRole.PROVIDER),
+                userRepository.countByDeletedFalse(),
+                userRepository.countByRoleAndDeletedFalse(UserRole.CUSTOMER),
+                userRepository.countByRoleAndDeletedFalse(UserRole.PROVIDER),
                 providerRepository.countByStatus(ProviderStatus.PENDING),
                 appointmentRepository.count(),
-                appointmentRepository.countByStatus(com.booking.enums.AppointmentStatus.PENDING),
-                appointmentRepository.totalRevenue(),
-                slotRepository.count(),
-                reviewRepository.count());
+                appointmentRepository.countByStatus(AppointmentStatus.PENDING),
+                appointmentRepository.countByStatus(AppointmentStatus.CONFIRMED) + appointmentRepository.countByStatus(AppointmentStatus.RESCHEDULED),
+                appointmentRepository.countByStatus(AppointmentStatus.COMPLETED),
+                appointmentRepository.countByStatus(AppointmentStatus.CANCELLED),
+                BookingUtils.money(revenue),
+                reviewRepository.count(),
+                reviewRepository.countByStatus(ReviewStatus.PENDING));
     }
 
-    public List<ProviderResponse> pendingProviders() {
-        return providerRepository.findAll().stream()
-                .filter(p -> p.getStatus() == ProviderStatus.PENDING)
-                .map(this::toResponseLite).toList();
+    @Transactional(readOnly = true)
+    public PageResponse<UserResponse> users(String q, UserRole role, Boolean active, int page, int size) {
+        Specification<User> spec = (root, query, cb) -> {
+            List<Predicate> ps = new ArrayList<>();
+            ps.add(cb.isFalse(root.get("deleted")));
+            if (role != null) ps.add(cb.equal(root.get("role"), role));
+            if (active != null) ps.add(cb.equal(root.get("active"), active));
+            if (q != null && !q.isBlank()) {
+                String like = "%" + q.trim().toLowerCase() + "%";
+                ps.add(cb.or(cb.like(cb.lower(root.get("name")), like), cb.like(cb.lower(root.get("email")), like),
+                        cb.like(cb.coalesce(root.get("phone"), ""), like)));
+            }
+            return cb.and(ps.toArray(Predicate[]::new));
+        };
+        Page<User> result = userRepository.findAll(spec, PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100),
+                Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id"))));
+        return PageResponse.of(result, result.getContent().stream().map(mapper::user).toList());
     }
 
-    public PageResponse<UserResponse> users(int page, int size, String role) {
-        Page<User> result;
-        if (role != null && !role.isBlank()) {
-            result = userRepository.findAll((root, query, cb) ->
-                    cb.equal(root.get("role"), UserRole.valueOf(role.toUpperCase())),
-                    PageRequest.of(page, size));
-        } else {
-            result = userRepository.findAll(PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
+    public List<User> exportUsers() {
+        return userRepository.findAll(Sort.by("id")).stream().filter(u -> !u.isDeleted()).toList();
+    }
+
+    /** Activate / deactivate: deactivation revokes all sessions immediately. */
+    @Transactional
+    public UserResponse setActive(Long id, boolean active) {
+        User u = manageable(id);
+        u.setActive(active);
+        if (!active) {
+            u.setTokenVersion(u.getTokenVersion() + 1);
         }
-        List<UserResponse> content = result.getContent().stream().map(UserResponse::of).toList();
-        return new PageResponse<>(content, page, size, result.getTotalElements(), result.getTotalPages());
+        staffRepository.findByUserId(id).ifPresent(s -> s.setActive(active));
+        auditService.record(active ? "USER_ACTIVATED" : "USER_DEACTIVATED", "User", id, u.getEmail());
+        return mapper.user(u);
     }
 
+    /**
+     * Deletes an account. Booking and payment history must be kept for accounting, so the
+     * user is anonymised and disabled rather than physically removed.
+     */
     @Transactional
-    public ProviderResponse decideProvider(Long id, AdminProviderDecision decision) {
-        Provider p = providerRepository.findById(id)
-                .orElseThrow(() -> ApiException.notFound("Provider not found"));
-        p.setStatus(decision.status());
-        p.setAdminNote(decision.note());
-        providerRepository.save(p);
-        return toResponseLite(p);
+    public void delete(Long id) {
+        User u = manageable(id);
+        String original = u.getEmail();
+        u.setDeleted(true);
+        u.setActive(false);
+        u.setTokenVersion(u.getTokenVersion() + 1);
+        u.setName("Deleted user");
+        u.setEmail("deleted-" + u.getId() + "-" + BookingUtils.randomString(6).toLowerCase() + "@deleted.invalid");
+        u.setPhone(null);
+        u.setPhotoUrl(null);
+        u.setGoogleId(null);
+        u.getAddresses().clear();
+        providerRepository.findByUserId(id).ifPresent(p -> p.setStatus(ProviderStatus.SUSPENDED));
+        staffRepository.findByUserId(id).ifPresent(s -> { s.setActive(false); s.setUser(null); });
+        auditService.record("USER_DELETED", "User", id, BookingUtils.maskEmail(original));
     }
 
-    @Transactional
-    public UserResponse toggleUserActive(Long id) {
-        User u = userRepository.findById(id)
+    private User manageable(Long id) {
+        User u = userRepository.findById(id).filter(x -> !x.isDeleted())
                 .orElseThrow(() -> ApiException.notFound("User not found"));
-        u.setActive(!u.isActive());
-        return UserResponse.of(userRepository.save(u));
-    }
-
-    public List<CategoryResponse> categories() {
-        return categoryRepository.findAllByOrderByNameAsc().stream()
-                .map(c -> new CategoryResponse(c.getId(), c.getName(), c.getIcon(), c.getSlug())).toList();
-    }
-
-    @Transactional
-    public CategoryResponse createCategory(CategoryRequest req) {
-        if (categoryRepository.existsByName(req.name())) {
-            throw ApiException.conflict("Category already exists");
+        if (u.getId().equals(SecurityUtils.currentUserId())) {
+            throw ApiException.badRequest("You cannot change your own account here");
         }
-        Category c = Category.builder()
-                .name(req.name())
-                .icon(req.icon())
-                .slug(req.name().toLowerCase().replace(" ", "-"))
-                .build();
-        c = categoryRepository.save(c);
-        return new CategoryResponse(c.getId(), c.getName(), c.getIcon(), c.getSlug());
-    }
-
-    @Transactional
-    public void deleteCategory(Long id) {
-        categoryRepository.deleteById(id);
-    }
-
-    private ProviderResponse toResponseLite(Provider p) {
-        CategoryResponse cat = p.getCategory() != null
-                ? new CategoryResponse(p.getCategory().getId(), p.getCategory().getName(),
-                        p.getCategory().getIcon(), p.getCategory().getSlug())
-                : null;
-        return new ProviderResponse(
-                p.getId(), p.getBusinessName(), p.getDescription(), p.getLogoUrl(), p.getCoverUrl(),
-                cat, p.getCity(), p.getState(), p.getCountry(), p.getAddress(),
-                p.getLatitude(), p.getLongitude(), p.getPhone(), p.getWebsite(), p.getStatus(),
-                p.getRating(), p.getReviewCount(), p.getMaxAdvanceBookingDays(), p.getCancellationPolicy(),
-                p.getCreatedAt(), null, null, null);
+        return u;
     }
 }

@@ -1,9 +1,15 @@
 package com.booking.dto.request;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
+import com.booking.enums.*;
+import com.booking.validation.StrongPassword;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
+
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
 
 public record ChangePasswordRequest(
         @NotBlank String currentPassword,
-        @NotBlank @Size(min = 6) String newPassword
+        @NotBlank @StrongPassword String newPassword
 ) {}

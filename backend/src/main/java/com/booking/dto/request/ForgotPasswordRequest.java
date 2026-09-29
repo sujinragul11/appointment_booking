@@ -1,8 +1,12 @@
 package com.booking.dto.request;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
+import com.booking.enums.*;
+import com.booking.validation.StrongPassword;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 
-public record ForgotPasswordRequest(
-        @NotBlank @Email String email
-) {}
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+
+public record ForgotPasswordRequest(@NotBlank @Email String email) {}

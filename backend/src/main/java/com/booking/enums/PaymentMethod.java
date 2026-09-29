@@ -1,5 +1,6 @@
 package com.booking.enums;
 
+/** RAZORPAY covers card/UPI/netbanking/wallet through the Razorpay checkout. */
 public enum PaymentMethod {
-    CARD, UPI, NETBANKING, WALLET, PAY_AT_VENUE, RAZORPAY, STRIPE
+    RAZORPAY, PAY_AT_VENUE
 }

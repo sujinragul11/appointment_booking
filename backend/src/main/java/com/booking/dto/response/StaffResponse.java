@@ -1,5 +1,8 @@
 package com.booking.dto.response;
 
+import com.booking.enums.*;
+
+import java.time.*;
 import java.util.List;
 
 public record StaffResponse(
@@ -10,5 +13,6 @@ public record StaffResponse(
         String photoUrl,
         String bio,
         boolean active,
-        List<Long> serviceIds
+        List<Long> serviceIds,
+        String loginEmail
 ) {}

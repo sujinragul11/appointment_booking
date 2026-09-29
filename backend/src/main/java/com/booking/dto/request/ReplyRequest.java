@@ -1,7 +1,12 @@
 package com.booking.dto.request;
 
-import jakarta.validation.constraints.NotBlank;
+import com.booking.enums.*;
+import com.booking.validation.StrongPassword;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 
-public record ReplyRequest(
-        @NotBlank String reply
-) {}
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+
+public record ReplyRequest(@NotBlank @Size(max = 2000) String reply) {}

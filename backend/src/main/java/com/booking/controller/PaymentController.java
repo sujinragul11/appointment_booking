@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,31 +23,37 @@ public class PaymentController {
     private final PaymentService paymentService;
 
     @PostMapping("/create-order")
-    @Operation(summary = "Create payment order for an appointment")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @Operation(summary = "Create a Razorpay order for an unpaid booking (full amount or deposit)")
     public CreateOrderResponse createOrder(@RequestParam Long appointmentId) {
         return paymentService.createOrder(appointmentId);
     }
 
     @PostMapping("/verify")
-    @Operation(summary = "Verify payment and confirm appointment")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @Operation(summary = "Verify the Razorpay checkout signature and confirm the booking")
     public PaymentResponse verify(@Valid @RequestBody VerifyPaymentRequest request) {
         return paymentService.verify(request);
     }
 
-    @PostMapping("/{appointmentId}/fail")
-    @Operation(summary = "Mark payment failed (cancels pending appointment)")
-    public PaymentResponse fail(@PathVariable Long appointmentId) {
-        return paymentService.markFailed(appointmentId);
+    @PostMapping("/demo/complete")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @Operation(summary = "Development only (payments demo mode): simulate a successful checkout")
+    public PaymentResponse demoComplete(@RequestParam Long appointmentId) {
+        return paymentService.completeDemo(appointmentId);
+    }
+
+    @PostMapping("/webhook")
+    @Operation(summary = "Razorpay webhook (signed with the webhook secret)")
+    public MessageResponse webhook(@RequestBody String body,
+                                   @RequestHeader(value = "X-Razorpay-Signature", required = false) String signature) {
+        paymentService.webhook(body, signature == null ? "" : signature);
+        return new MessageResponse("ok");
     }
 
     @GetMapping("/history")
+    @Operation(summary = "My payment history (FR-40)")
     public List<PaymentResponse> history() {
         return paymentService.history();
-    }
-
-    @PostMapping("/{appointmentId}/refund")
-    @Operation(summary = "Refund a successful payment")
-    public MessageResponse refund(@PathVariable Long appointmentId) {
-        return paymentService.refund(appointmentId);
     }
 }

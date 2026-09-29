@@ -1,11 +1,16 @@
 package com.booking.dto.request;
 
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
+import com.booking.enums.*;
+import com.booking.validation.StrongPassword;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
+
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
 
 public record ReviewRequest(
         @NotNull Long appointmentId,
         @Min(1) @Max(5) int rating,
-        String comment
+        @Size(max = 2000) String comment
 ) {}

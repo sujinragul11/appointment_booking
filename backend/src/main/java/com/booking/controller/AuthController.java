@@ -10,10 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -24,73 +21,79 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/register")
-    @Operation(summary = "Register as Customer or Provider")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Register a customer or provider (FR-1); an e-mail verification code is sent")
+    public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
+        return authService.register(request);
     }
 
     @PostMapping("/login")
-    @Operation(summary = "Login with email/password")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(authService.login(request));
+    @Operation(summary = "Login with e-mail/password; returns access + refresh JWT (FR-3)")
+    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
+        return authService.login(request);
     }
 
     @PostMapping("/refresh")
-    @Operation(summary = "Refresh JWT access token")
-    public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
-        return ResponseEntity.ok(authService.refresh(request));
-    }
-
-    @PostMapping("/google")
-    @Operation(summary = "Google OAuth login (demo payload)")
-    public ResponseEntity<AuthResponse> googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
-        return ResponseEntity.ok(authService.googleLogin(request));
-    }
-
-    @PostMapping("/send-otp")
-    @Operation(summary = "Send OTP to mobile number")
-    public ResponseEntity<MessageResponse> sendOtp(@Valid @RequestBody SendOtpRequest request) {
-        return ResponseEntity.ok(authService.sendOtpChallenges(request));
-    }
-
-    @PostMapping("/verify-otp")
-    @Operation(summary = "Verify OTP (mobile or email verification)")
-    public ResponseEntity<MessageResponse> verifyOtp(@Valid @RequestBody OtpVerifyRequest request) {
-        return ResponseEntity.ok(authService.verifyOtp(request));
-    }
-
-    @PostMapping("/forgot-password")
-    @Operation(summary = "Request password reset OTP")
-    public ResponseEntity<MessageResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
-        return ResponseEntity.ok(authService.forgotPassword(request));
-    }
-
-    @PostMapping("/reset-password")
-    @Operation(summary = "Reset password with OTP")
-    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        return ResponseEntity.ok(authService.resetPassword(request));
-    }
-
-    @GetMapping("/me")
-    @Operation(summary = "Current authenticated user")
-    public ResponseEntity<UserResponse> me() {
-        return ResponseEntity.ok(authService.me());
-    }
-
-    @PutMapping("/profile")
-    @Operation(summary = "Update profile")
-    public ResponseEntity<UserResponse> updateProfile(@RequestBody UpdateProfileRequest request) {
-        return ResponseEntity.ok(authService.updateProfile(request));
-    }
-
-    @PutMapping("/password")
-    @Operation(summary = "Change password")
-    public ResponseEntity<MessageResponse> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
-        return ResponseEntity.ok(authService.changePassword(request));
+    @Operation(summary = "Exchange a refresh token for new tokens")
+    public AuthResponse refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        return authService.refresh(request);
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Map<String, Boolean>> logout() {
-        return ResponseEntity.ok(Map.of("success", true));
+    @Operation(summary = "Revoke all tokens of the current user (FR-7)")
+    public MessageResponse logout() {
+        return authService.logout();
+    }
+
+    @PostMapping("/google")
+    @Operation(summary = "Sign in with a Google ID token (FR-6)")
+    public AuthResponse google(@Valid @RequestBody GoogleLoginRequest request) {
+        return authService.googleLogin(request);
+    }
+
+    @PostMapping("/send-verification")
+    @Operation(summary = "Send an e-mail or SMS verification code (FR-2)")
+    public MessageResponse sendVerification(@Valid @RequestBody SendCodeRequest request) {
+        return authService.sendVerification(request);
+    }
+
+    @PostMapping("/verify")
+    @Operation(summary = "Verify e-mail or phone with the code (FR-2)")
+    public UserResponse verify(@Valid @RequestBody VerifyCodeRequest request) {
+        return authService.verify(request);
+    }
+
+    @PostMapping("/verify-otp")
+    @Operation(summary = "Public e-mail verification with e-mail + code")
+    public MessageResponse verifyOtp(@Valid @RequestBody OtpVerifyRequest request) {
+        return authService.verifyEmailPublic(request);
+    }
+
+    @PostMapping("/forgot-password")
+    @Operation(summary = "E-mail a password reset link (FR-4)")
+    public MessageResponse forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        return authService.forgotPassword(request);
+    }
+
+    @PostMapping("/reset-password")
+    @Operation(summary = "Set a new password using the token from the reset link")
+    public MessageResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return authService.resetPassword(request);
+    }
+
+    @GetMapping("/me")
+    public UserResponse me() {
+        return authService.me();
+    }
+
+    @PutMapping("/profile")
+    public UserResponse updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
+        return authService.updateProfile(request);
+    }
+
+    @PutMapping("/password")
+    @Operation(summary = "Change password; other sessions are signed out and new tokens returned")
+    public AuthResponse changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        return authService.changePassword(request);
     }
 }

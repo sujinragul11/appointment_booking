@@ -1,9 +1,9 @@
 package com.booking.dto.response;
 
-import com.booking.entity.User;
-import com.booking.enums.UserRole;
+import com.booking.enums.*;
 
-import java.time.LocalDateTime;
+import java.time.*;
+import java.util.List;
 
 public record UserResponse(
         Long id,
@@ -14,19 +14,15 @@ public record UserResponse(
         String photoUrl,
         boolean verified,
         boolean emailVerified,
+        boolean phoneVerified,
         Long providerId,
+        Long staffId,
+        String language,
+        String timezone,
+        boolean notifEmail,
+        boolean notifSms,
+        boolean notifPush,
+        boolean active,
         LocalDateTime createdAt,
-        boolean active
-) {
-
-    public static UserResponse of(User u) {
-        return of(u, null);
-    }
-
-    public static UserResponse of(User u, Long providerId) {
-        return new UserResponse(
-                u.getId(), u.getName(), u.getEmail(), u.getPhone(), u.getRole(),
-                u.getPhotoUrl(), u.isVerified(), u.isEmailVerified(), providerId, u.getCreatedAt(),
-                u.isActive());
-    }
-}
+        LocalDateTime lastLoginAt
+) {}

@@ -51,7 +51,16 @@ public class Coupon {
     @Builder.Default
     private int usedCount = 0;
 
+    /** Maximum uses per customer; 0 = unlimited. */
+    @Column(name = "per_user_limit", nullable = false)
+    @Builder.Default
+    private int perUserLimit = 0;
+
     @Column(name = "is_active", nullable = false)
     @Builder.Default
     private boolean active = true;
+
+    @org.hibernate.annotations.CreationTimestamp
+    @Column(name = "created_at", updatable = false)
+    private java.time.LocalDateTime createdAt;
 }
