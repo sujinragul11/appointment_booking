@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api/client';
 import StatusBadge from '../../components/StatusBadge';
-import { formatMoney, formatTime } from '../../utils/format';
+import { formatMoney, formatTime, todayISO } from '../../utils/format';
 
 export default function ProviderDashboard() {
   const [stats, setStats] = useState(null);
@@ -12,7 +12,7 @@ export default function ProviderDashboard() {
   useEffect(() => {
     api.get('/provider/stats').then((r) => setStats(r.data)).catch(() => {});
     api.get('/provider/me').then((r) => setMe(r.data)).catch(() => {});
-    api.get('/appointments/provider/today', { params: { date: new Date().toISOString().slice(0, 10) } })
+    api.get('/appointments/provider/today', { params: { date: todayISO() } })
       .then((r) => setToday(r.data)).catch(() => {});
   }, []);
 
@@ -44,7 +44,7 @@ export default function ProviderDashboard() {
               {me ? me.businessName : 'Provider dashboard'}
             </h1>
             <p>{me ? `${me.city || ''} \u2022 ${me.services?.length || 0} services \u2022 ` : ''}
-              {stats ? `${stats.rating.toFixed(1)} \u2605 (${stats.reviewCount})` : ''}</p>
+              {stats ? `${Number(stats.rating || 0).toFixed(1)} \u2605 (${stats.reviewCount ?? 0})` : ''}</p>
           </div>
           <span className="badge badge-success" style={{ alignSelf: 'flex-start' }}>{me?.status}</span>
         </div>

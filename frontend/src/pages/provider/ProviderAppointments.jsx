@@ -2,27 +2,43 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api/client';
 import { useToast } from '../../components/Toast';
-import StatusBadge from '../../components/StatusBadge';
+import StatusBadge, { useStatusLabel } from '../../components/StatusBadge';
 import { formatMoney, formatTime } from '../../utils/format';
 import { getErrorMessage } from '../../api/client';
+
+const FILTERS = ['', 'CONFIRMED', 'PENDING', 'RESCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NO_SHOW'];
+// RESCHEDULED bookings are live bookings too: same actions as CONFIRMED.
+const LIVE = ['CONFIRMED', 'RESCHEDULED'];
+
+// The backend reports todayAppointments/upcomingAppointments/...; older builds used today/upcoming/...
+export function normalizeStats(s = {}) {
+  const pick = (...keys) => Number(keys.map((k) => s?.[k]).find((v) => v !== undefined && v !== null) ?? 0) || 0;
+  return {
+    today: pick('todayAppointments', 'today'),
+    upcoming: pick('upcomingAppointments', 'upcoming'),
+    completed: pick('completedAppointments', 'completed'),
+    cancelled: pick('cancelledAppointments', 'cancelled')
+  };
+}
 
 export default function ProviderAppointments() {
   const [items, setItems] = useState(null);
   const [filter, setFilter] = useState('');
-  const [stats, setStats] = useState({ today: 0, upcoming: 0, completed: 0, cancelled: 0 });
+  const [stats, setStats] = useState(() => normalizeStats());
   const toast = useToast();
+  const statusLabel = useStatusLabel();
 
   const load = () => api.get('/appointments/provider').then((r) => setItems(r.data)).catch(() => setItems([]));
   useEffect(() => {
     load();
-    api.get('/provider/stats').then((r) => setStats(r.data)).catch(() => {});
+    api.get('/provider/stats').then((r) => setStats(normalizeStats(r.data))).catch(() => {});
   }, []);
 
   const setStatus = async (a, status) => {
     try {
       const { data } = await api.put(`/appointments/${a.id}/status`, { status });
       setItems((p) => (p || []).map((x) => (x.id === data.id ? data : x)));
-      toast(`${a.bookingRef} marked ${status}`, 'success');
+      toast(`${a.bookingRef} marked ${statusLabel(status)}`, 'success');
     } catch (e) { toast(getErrorMessage(e), 'error'); }
   };
 
@@ -53,18 +69,19 @@ export default function ProviderAppointments() {
           <div className="stat-card"><span className="stat-value">{stats.cancelled}</span><span className="stat-label">Cancelled</span></div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
-          {['', 'CONFIRMED', 'PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NO_SHOW'].map((s) => (
-            <button key={s || 'all'} className={`chip ${filter === s ? 'active' : ''}`} onClick={() => setFilter(s)}>{s || 'All'}</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }} role="group" aria-label="Filter by status">
+          {FILTERS.map((s) => (
+            <button key={s || 'all'} type="button" className={`chip ${filter === s ? 'active' : ''}`} aria-pressed={filter === s}
+              onClick={() => setFilter(s)}>{s ? statusLabel(s) : 'All'}</button>
           ))}
         </div>
 
         {!items ? (
           <p style={{ color: 'var(--muted)' }}>Loading...</p>
         ) : filtered.length === 0 ? (
-          <div className="empty card card-pad"><h3>No appointments {filter && `with status ${filter}`}</h3><p className="mt-1">Bookings will appear here.</p></div>
+          <div className="empty card card-pad"><h2 style={{ fontSize: '1.15rem' }}>No appointments {filter && `with status ${statusLabel(filter)}`}</h2><p className="mt-1">Bookings will appear here.</p></div>
         ) : (
-          <div className="card" style={{ overflowX: 'auto' }}>
+          <div className="card table-wrap">
             <table className="table">
               <thead>
                 <tr><th>Customer</th><th>Service</th><th>When</th><th>Amount</th><th>Status</th><th>Actions</th></tr>
@@ -79,10 +96,10 @@ export default function ProviderAppointments() {
                     <td><StatusBadge status={a.status} /></td>
                     <td>
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', minWidth: 190 }}>
-                        {a.status === 'CONFIRMED' && <button className="btn btn-primary btn-xs" onClick={() => setStatus(a, 'IN_PROGRESS')}>Start</button>}
-                        {a.status === 'IN_PROGRESS' && <button className="btn btn-success btn-xs" onClick={() => setStatus(a, 'COMPLETED')}>Complete</button>}
-                        {a.status === 'CONFIRMED' && <button className="btn btn-danger btn-xs" onClick={() => setStatus(a, 'NO_SHOW')}>No-show</button>}
-                        {['CONFIRMED', 'PENDING'].includes(a.status) && <button className="btn btn-outline btn-xs" onClick={() => setStatus(a, 'CANCELLED')}>Cancel</button>}
+                        {LIVE.includes(a.status) && <button type="button" className="btn btn-primary btn-xs" onClick={() => setStatus(a, 'IN_PROGRESS')}>Start</button>}
+                        {a.status === 'IN_PROGRESS' && <button type="button" className="btn btn-success btn-xs" onClick={() => setStatus(a, 'COMPLETED')}>Complete</button>}
+                        {LIVE.includes(a.status) && <button type="button" className="btn btn-danger btn-xs" onClick={() => setStatus(a, 'NO_SHOW')}>No-show</button>}
+                        {['PENDING', ...LIVE].includes(a.status) && <button type="button" className="btn btn-outline btn-xs" onClick={() => setStatus(a, 'CANCELLED')}>Cancel</button>}
                       </div>
                     </td>
                   </tr>

@@ -3,6 +3,8 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { getErrorMessage } from '../api/client';
+import { useT } from '../i18n';
+import { homePathFor, nextFromLocation } from '../utils/routes';
 
 const DEMOS = [
   ['Customer', 'customer@booking.com', 'Customer@123', 'Rajesh Kumar'],
@@ -20,9 +22,11 @@ const PROVIDERS = [
 
 export default function Login() {
   const { login } = useAuth();
+  const t = useT();
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+  const next = nextFromLocation(location);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,52 +39,52 @@ export default function Login() {
     setBusy(true);
     try {
       const user = await login(email, password);
-      toast(`${user.role === 'ADMIN' ? 'Welcome admin' : user.role === 'PROVIDER' ? 'Welcome back, provider' : 'Welcome back'}, ${user.name}!`, 'success');
-      const from = location.state?.from;
-      if (from) navigate(from, { replace: true });
-      else if (user.role === 'ADMIN') navigate('/dashboard/admin', { replace: true });
-      else if (user.role === 'PROVIDER') navigate('/dashboard/provider', { replace: true });
-      else navigate('/dashboard', { replace: true });
+      const key = user.role === 'ADMIN' ? 'auth.welcomeAdmin' : user.role === 'PROVIDER' ? 'auth.welcomeProvider' : 'auth.welcomeBack';
+      toast(t(key, { name: user.name }), 'success');
+      navigate(next || homePathFor(user.role), { replace: true });
     } catch (err) {
-      setError(getErrorMessage(err, 'Invalid credentials'));
+      setError(getErrorMessage(err, t('auth.invalidCredentials')));
     } finally {
       setBusy(false);
     }
   };
 
+  const registerLink = next ? `/register?next=${encodeURIComponent(next)}` : '/register';
+
   return (
     <div className="container page" style={{ maxWidth: 480 }}>
       <div className="card card-pad" style={{ boxShadow: 'var(--shadow)' }}>
-        <h1 style={{ fontSize: '1.6rem', marginBottom: 4 }}>Welcome back</h1>
-        <p style={{ color: 'var(--muted)', marginBottom: 24 }}>Sign in to manage your bookings.</p>
+        <h1 style={{ fontSize: '1.6rem', marginBottom: 4 }}>{t('auth.loginTitle')}</h1>
+        <p style={{ color: 'var(--muted)', marginBottom: 24 }}>{t('auth.loginText')}</p>
 
-        {error && <div className="form-error">{error}</div>}
+        {location.state?.sessionExpired && !error && <div className="form-note" role="status">{t('auth.sessionExpired')}</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
 
         <form onSubmit={submit}>
           <div className="field">
-            <label>Email</label>
-            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com" autoComplete="email" />
+            <label htmlFor="login-email">{t('auth.email')}</label>
+            <input id="login-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder={t('auth.emailPlaceholder')} autoComplete="email" />
           </div>
           <div className="field">
-            <label>Password</label>
-            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder="Your password" autoComplete="current-password" />
+            <label htmlFor="login-password">{t('auth.password')}</label>
+            <input id="login-password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder={t('auth.passwordPlaceholder')} autoComplete="current-password" />
           </div>
           <button className="btn btn-primary btn-block btn-lg" disabled={busy} type="submit">
-            {busy ? 'Signing in...' : 'Sign in'}
+            {busy ? t('auth.signingIn') : t('auth.signIn')}
           </button>
         </form>
 
         <div className="divider-h" />
         <p style={{ textAlign: 'center', color: 'var(--muted)', fontSize: '0.92rem' }}>
-          New to Sloto? <Link to="/register">Create an account</Link>
+          {t('auth.newHere')} <Link to={registerLink}>{t('auth.createAccountLink')}</Link>
         </p>
       </div>
 
       <div className="demo-accounts mt-3">
-        <strong style={{ color: 'var(--brand-700)' }}>Demo accounts</strong>
-        <p className="mt-1" style={{ color: 'var(--ink-2)' }}>One-click test logins — each provider has its own dashboard:</p>
+        <strong style={{ color: 'var(--brand-700)' }}>{t('auth.demoTitle')}</strong>
+        <p className="mt-1" style={{ color: 'var(--ink-2)' }}>{t('auth.demoText')}</p>
         <div className="mt-1" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {DEMOS.map(([role, em, pw]) => (
             <button key={role} type="button" className="chip"
@@ -90,7 +94,7 @@ export default function Login() {
           ))}
         </div>
         <div className="divider-h my-2" />
-        <p className="mt-1" style={{ color: 'var(--ink-2)' }}>Providers:</p>
+        <p className="mt-1" style={{ color: 'var(--ink-2)' }}>{t('auth.demoProviders')}</p>
         <div className="mt-1" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {PROVIDERS.map(([name, em, pw]) => (
             <button key={em} type="button" className="chip"

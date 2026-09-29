@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import api from '../../api/client';
 import Modal from '../../components/Modal';
 import { useToast } from '../../components/Toast';
-import { formatTime } from '../../utils/format';
+import { formatTime, todayISO } from '../../utils/format';
 import { getErrorMessage } from '../../api/client';
 
 const DAYS = ['-', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -15,7 +15,7 @@ export default function ProviderAvailability() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ dayOfWeek: 1, startTime: '09:00', endTime: '18:00', staffId: '', active: true });
   const [showOverride, setShowOverride] = useState(false);
-  const [overrideForm, setOverrideForm] = useState({ date: new Date().toISOString().slice(0, 10), startTime: '09:00', endTime: '18:00', isAvailable: true, reason: '' });
+  const [overrideForm, setOverrideForm] = useState({ date: todayISO(), startTime: '09:00', endTime: '18:00', isAvailable: true, reason: '' });
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -110,7 +110,7 @@ export default function ProviderAvailability() {
             <button className="btn btn-primary mt-3" onClick={() => setShowForm(true)}>Add first slot</button>
           </div>
         ) : (
-          <div className="card" style={{ overflowX: 'auto' }}>
+          <div className="card table-wrap">
             <table className="table">
               <thead><tr><th>Day</th><th>Open</th><th>Close</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
@@ -160,7 +160,7 @@ export default function ProviderAvailability() {
                 {DAYS.slice(1).map((d, i) => <option key={d} value={i + 1}>{d}</option>)}
               </select>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-grid">
               <div className="field"><label>Open</label><input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} required /></div>
               <div className="field"><label>Close</label><input type="time" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} required /></div>
             </div>
@@ -183,13 +183,13 @@ export default function ProviderAvailability() {
       {showOverride && (
         <Modal title="Date override" onClose={() => setShowOverride(false)}>
           <form onSubmit={addOverride}>
-            <div className="field"><label>Date</label><input type="date" value={overrideForm.date} onChange={(e) => setOverrideForm({ ...overrideForm, date: e.target.value })} required /></div>
+            <div className="field"><label htmlFor="ov-date">Date</label><input id="ov-date" type="date" min={todayISO()} value={overrideForm.date} onChange={(e) => setOverrideForm({ ...overrideForm, date: e.target.value })} required /></div>
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '4px 0 12px', cursor: 'pointer' }}>
               <input type="checkbox" checked={overrideForm.isAvailable} onChange={(e) => setOverrideForm({ ...overrideForm, isAvailable: e.target.checked })} />
               Open for bookings on this day
             </label>
             {overrideForm.isAvailable && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-grid">
                 <div className="field"><label>From</label><input type="time" value={overrideForm.startTime} onChange={(e) => setOverrideForm({ ...overrideForm, startTime: e.target.value })} required /></div>
                 <div className="field"><label>To</label><input type="time" value={overrideForm.endTime} onChange={(e) => setOverrideForm({ ...overrideForm, endTime: e.target.value })} required /></div>
               </div>

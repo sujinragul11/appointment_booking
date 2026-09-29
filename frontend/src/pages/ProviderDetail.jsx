@@ -4,26 +4,44 @@ import api from '../api/client';
 import Loader from '../components/Loader';
 import StarRating from '../components/StarRating';
 import StatusBadge from '../components/StatusBadge';
-import { formatMoney, formatDateTime, initials } from '../utils/format';
+import { formatMoney, formatDateTime, initials, isValidTimeZone, timeZoneLabel } from '../utils/format';
+
+const isActive = (x) => x && x.active !== false;
 
 export default function ProviderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [provider, setProvider] = useState(null);
+  const [notFound, setNotFound] = useState(false);
   const [reviews, setReviews] = useState([]);
   const [avail, setAvail] = useState(null);
 
   useEffect(() => {
-    api.get(`/providers/${id}`).then((r) => setProvider(r.data)).catch(() => {});
-    api.get(`/providers/${id}/reviews`).then((r) => setReviews(r.data)).catch(() => {});
+    setProvider(null);
+    setNotFound(false);
+    api.get(`/providers/${id}`).then((r) => setProvider(r.data)).catch(() => setNotFound(true));
+    api.get(`/providers/${id}/reviews`).then((r) => setReviews(r.data || [])).catch(() => {});
     api.get(`/providers/${id}/availability`).then((r) => setAvail(r.data)).catch(() => {});
   }, [id]);
 
+  if (notFound) {
+    return (
+      <div className="container page">
+        <div className="empty card card-pad">
+          <h1 style={{ fontSize: '1.3rem' }}>Provider not found</h1>
+          <p className="mt-1">This listing may have been removed.</p>
+          <Link className="btn btn-primary mt-3" to="/providers">Browse providers</Link>
+        </div>
+      </div>
+    );
+  }
   if (!provider) return <Loader />;
 
-  const services = provider.services || [];
-  const staff = provider.staff || [];
+  // Inactive services/staff can't be booked, so they're not listed.
+  const services = (provider.services || []).filter(isActive);
+  const staff = (provider.staff || []).filter(isActive);
   const branches = provider.branches || [];
+  const tz = isValidTimeZone(provider.timezone) ? provider.timezone : null;
 
   return (
     <div className="container page">
@@ -62,7 +80,7 @@ export default function ProviderDetail() {
         </div>
       </div>
 
-      <div className="grid-2 grid mt-4" style={{ gridTemplateColumns: '1.6fr 1fr' }}>
+      <div className="detail-grid mt-4">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {services.length > 0 && (
             <section className="card">
@@ -76,7 +94,7 @@ export default function ProviderDetail() {
                         <div style={{ fontSize: '0.83rem', color: 'var(--muted)' }}>{s.durationMin}-{s.durationMin + s.bufferMin} min</div>
                       </div>
                       <div style={{ fontWeight: 800, fontSize: '1.05rem' }}>{formatMoney(s.price)}</div>
-                      <Link className="btn btn-outline btn-sm" to={`/book/${provider.id}/${s.id}`}>Book</Link>
+                      <Link className="btn btn-outline btn-sm" to={`/book/${provider.id}/${s.id}`} aria-label={`Book ${s.name}`}>Book</Link>
                     </div>
                   ))}
                 </div>
@@ -109,7 +127,7 @@ export default function ProviderDetail() {
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 12 }}>Locations</h2>
                 {branches.map((b) => (
                   <div key={b.id} className="list-item">
-                    <div className="avatar" style={{ width: 40, height: 40 }}>{'\u{1F4CD}'}</div>
+                    <div className="avatar" style={{ width: 40, height: 40 }} aria-hidden="true">{'\u{1F4CD}'}</div>
                     <div>
                       <div style={{ fontWeight: 700 }}>{b.name}{b.main ? ' \u2022 Main' : ''}</div>
                       <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
@@ -153,9 +171,10 @@ export default function ProviderDetail() {
           </section>
         </div>
 
-        <div style={{ position: 'sticky', top: 100, display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div className="detail-side">
           <div className="card card-pad">
             <h3 style={{ fontWeight: 800, marginBottom: 12 }}>Working hours</h3>
+            {tz && <p className="tz-note">Times in {timeZoneLabel(tz)} ({tz})</p>}
             {avail?.availability?.length ? (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {avail.availability.map((a) => (
@@ -179,9 +198,13 @@ export default function ProviderDetail() {
             </div>
           </div>
 
-          <button className="btn btn-primary btn-lg" onClick={() => navigate(`/book/${provider.id}/${services[0]?.id || ''}`)}>
-            Book an appointment
-          </button>
+          {services.length > 0 ? (
+            <button className="btn btn-primary btn-lg" onClick={() => navigate(`/book/${provider.id}/${services[0].id}`)}>
+              Book an appointment
+            </button>
+          ) : (
+            <p className="form-note">Online booking isn't available for this provider yet.</p>
+          )}
         </div>
       </div>
     </div>

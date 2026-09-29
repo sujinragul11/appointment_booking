@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import api from '../../api/client';
 import Modal from '../../components/Modal';
+import AccountNav from '../../components/AccountNav';
 import { useToast } from '../../components/Toast';
 import { getErrorMessage } from '../../api/client';
 
@@ -43,14 +43,7 @@ export default function AddressBook() {
 
   return (
     <div className="dash">
-      <aside className="dash-side">
-        <nav className="dash-nav">
-          <Link to="/dashboard">My bookings</Link>
-          <Link to="/profile">Profile</Link>
-          <Link to="/addresses" className="active">Addresses</Link>
-          <Link to="/notifications">Notifications</Link>
-        </nav>
-      </aside>
+      <AccountNav />
 
       <div>
         <div className="section-title">
@@ -69,12 +62,12 @@ export default function AddressBook() {
             <p className="mt-1">Add one so booking forms are quicker to fill.</p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+          <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))' }}>
             {items.map((a) => (
               <div key={a.id} className="card card-pad">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <strong>{a.label}</strong>
-                  {a.defaultAddress && <span className="badge badge-success">Default</span>}
+                  {a.defaultAddress && <span className="badge badge-green">Default</span>}
                 </div>
                 <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginTop: 8 }}>
                   {a.addressLine}<br />
@@ -93,22 +86,22 @@ export default function AddressBook() {
         <Modal title="Add address" onClose={close}>
           <form onSubmit={save}>
             <div className="field">
-              <label>Label</label>
-              <select value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })}>
+              <label htmlFor="addr-label">Label</label>
+              <select id="addr-label" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })}>
                 {['Home', 'Work', 'Other'].map((l) => <option key={l}>{l}</option>)}
               </select>
             </div>
             <div className="field">
-              <label>Address line</label>
-              <input value={form.addressLine} onChange={(e) => setForm({ ...form, addressLine: e.target.value })} required />
+              <label htmlFor="addr-line">Address line</label>
+              <input id="addr-line" value={form.addressLine} onChange={(e) => setForm({ ...form, addressLine: e.target.value })} required />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div className="field"><label>City</label><input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
-              <div className="field"><label>State</label><input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></div>
+            <div className="form-grid">
+              <div className="field"><label htmlFor="addr-city">City</label><input id="addr-city" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
+              <div className="field"><label htmlFor="addr-state">State</label><input id="addr-state" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div className="field"><label>Country</label><input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></div>
-              <div className="field"><label>PIN code</label><input value={form.zip} onChange={(e) => setForm({ ...form, zip: e.target.value })} /></div>
+            <div className="form-grid">
+              <div className="field"><label htmlFor="addr-country">Country</label><input id="addr-country" value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></div>
+              <div className="field"><label htmlFor="addr-zip">PIN code</label><input id="addr-zip" value={form.zip} onChange={(e) => setForm({ ...form, zip: e.target.value })} /></div>
             </div>
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0 14px', cursor: 'pointer' }}>
               <input type="checkbox" checked={form.defaultAddress} onChange={(e) => setForm({ ...form, defaultAddress: e.target.checked })} />
