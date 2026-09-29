@@ -22,3 +22,6 @@ frontend/playwright-report/
 backend/uploads/
 backups/
 *.log
+
+# Local Redis snapshots
+dump.rdb
