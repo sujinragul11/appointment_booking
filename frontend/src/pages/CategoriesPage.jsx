@@ -1,36 +1,53 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/client';
-import Loader from '../components/Loader';
+import { InlineLoader } from '../components/Loader';
+import { useT } from '../i18n';
 
 export default function CategoriesPage() {
+  const t = useT();
   const [categories, setCategories] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    api.get('/categories').then((r) => setCategories(r.data || [])).catch(() => setCategories([]));
-  }, []);
+    setFailed(false);
+    api.get('/categories')
+      .then((r) => setCategories(Array.isArray(r.data) ? r.data : []))
+      .catch(() => { setCategories([]); setFailed(true); });
+  }, [attempt]);
 
   return (
     <div className="container page">
-      <h1 style={{ fontSize: '1.9rem', fontWeight: 800 }}>Browse by category</h1>
-      <p style={{ color: 'var(--muted)', marginTop: 4 }}>Pick a category to discover the best nearby professionals</p>
+      <h1 className="page-title">{t('site.categories.title')}</h1>
+      <p className="page-lead">{t('site.categories.lead')}</p>
 
       {!categories ? (
-        <div className="mt-3"><Loader /></div>
-      ) : categories.length === 0 ? (
-        <div className="empty mt-3"><p>No categories yet.</p></div>
-      ) : (
-        <div className="grid grid-3 mt-3">
-          {categories.map((c) => (
-            <Link key={c.id} to={`/providers?categoryId=${c.id}`} className="card card-pad card-hover">
-              <div className="provider-logo" style={{ marginTop: 0, width: 56, height: 56, fontSize: '1.6rem' }} aria-hidden="true">{c.icon || '✦'}</div>
-              <h2 style={{ marginTop: 14, fontSize: '1.15rem' }}>{c.name}</h2>
-              <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>Find and book professional services</p>
-              <span className="link-more mt-2" style={{ display: 'inline-block' }}>Explore &rarr;</span>
-            </Link>
-          ))}
+        <p className="muted-line mt-3" role="status"><InlineLoader label={t('common.loading')} /> {t('common.loading')}</p>
+      ) : failed ? (
+        <div className="form-error mt-3" role="alert">
+          {t('site.categories.loadFailed')}{' '}
+          <button type="button" className="btn btn-outline btn-xs" onClick={() => setAttempt((n) => n + 1)}>{t('common.retry')}</button>
         </div>
+      ) : categories.length === 0 ? (
+        <div className="empty mt-3"><p>{t('site.categories.empty')}</p></div>
+      ) : (
+        <ul className="grid grid-3 mt-3 plain-grid card-grid">
+          {categories.map((c) => (
+            <li key={c.id}>
+              <Link to={`/providers?categoryId=${c.id}`} className="card card-pad card-hover category-card">
+                <span className="provider-logo category-ico-lg" aria-hidden="true">{c.icon || '✦'}</span>
+                <h2 className="category-card-title">{c.name}</h2>
+                <p className="category-card-text">{c.description || t('site.categories.fallbackText')}</p>
+                <span className="link-more">{t('site.categories.explore')} <span aria-hidden="true">&rarr;</span></span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
+      <p className="mt-4 center">
+        <Link to="/services" className="btn btn-outline">{t('site.home.servicesCta')}</Link>
+      </p>
     </div>
   );
 }

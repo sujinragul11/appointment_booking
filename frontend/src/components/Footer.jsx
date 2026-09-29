@@ -14,6 +14,7 @@ export default function Footer() {
           <nav aria-labelledby="footer-explore">
             <h2 id="footer-explore">{t('footer.explore')}</h2>
             <Link to="/providers">{t('footer.browseProviders')}</Link>
+            <Link to="/services">{t('site.nav.services')}</Link>
             <Link to="/categories">{t('footer.categories')}</Link>
             <Link to="/register?role=PROVIDER">{t('footer.joinProvider')}</Link>
           </nav>

@@ -31,7 +31,8 @@ export default function Navbar() {
   };
 
   const links = [
-    { to: '/providers', label: t('nav.browse') },
+    { to: '/providers', label: t('site.nav.providers') },
+    { to: '/services', label: t('site.nav.services') },
     { to: '/categories', label: t('nav.categories') }
   ];
   if (user?.role === 'PROVIDER') links.push({ to: '/dashboard/provider', label: t('nav.dashboard') });

@@ -1,41 +1,55 @@
 import { Link } from 'react-router-dom';
-import StarRating from './StarRating';
+import { useT } from '../i18n';
 import { formatMoney } from '../utils/format';
+import { tp } from '../utils/plural';
 
-const ICO = {
-  'Doctor': '\u2695', 'Dentist': '\u2637', 'Salon & Spa': '\u2726', 'Consultant': '\u2666',
-  'Tutor': '\u270E', 'Fitness': '\u269A', 'Dermatology': '\u2695', 'Physiotherapy': '\u2664'
-};
+/** Price range of a provider's active services: "₹300 – ₹3,000", or one price. */
+export function priceRange(min, max) {
+  if (min == null && max == null) return '';
+  if (min == null || max == null || Number(min) === Number(max)) return formatMoney(min ?? max);
+  return `${formatMoney(min)} – ${formatMoney(max)}`;
+}
 
-export default function ProviderCard({ p }) {
-  const icon = ICO[p.category?.name] || '\u2726';
-  const best = p.services?.[0];
+/** Search result card (FR-19): rating, reviews, price range, city and specialty. */
+export default function ProviderCard({ p, headingLevel = 3 }) {
+  const t = useT();
+  const Heading = `h${headingLevel}`;
+  const icon = p.category?.icon || '✦';
+  const rating = Number(p.rating || 0);
+  const prices = priceRange(p.minPrice, p.maxPrice);
+  const where = [p.city, p.country].filter(Boolean).join(', ');
+
   return (
     <Link to={`/providers/${p.id}`} className="card card-hover provider-card">
-      <div className="provider-cover" style={{ background: `linear-gradient(135deg, ${p.logoUrl ? 'transparent' : '#eef2ff'}, #f5f3ff)` }}>
-        {p.coverUrl && <img src={p.coverUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+      <div className="provider-cover">
+        {p.coverUrl && <img src={p.coverUrl} alt="" loading="lazy" />}
       </div>
       <div className="provider-logo-wrap">
-        <div className="provider-logo">
-          {p.logoUrl ? <img src={p.logoUrl} alt="" style={{ width: 56, height: 56, borderRadius: 12 }} /> : <span>{icon}</span>}
+        <div className="provider-logo" aria-hidden="true">
+          {p.logoUrl ? <img src={p.logoUrl} alt="" loading="lazy" /> : <span>{icon}</span>}
         </div>
       </div>
       <div className="provider-card-body">
         <div>
-          <h3>{p.businessName}</h3>
+          <Heading className="provider-card-title">{p.businessName}</Heading>
+          {(p.specialty || p.category?.name) && <p className="provider-specialty">{p.specialty || p.category?.name}</p>}
           <div className="meta mt-1">
-            <span className="rating-pill">&#9733; {p.rating?.toFixed?.(1) ?? p.rating}</span>
-            <span>{p.reviewCount} reviews</span>
-            <span>{'\u2022'}</span>
-            <span>{p.city}</span>
+            {p.reviewCount > 0 ? (
+              <span className="rating-pill">
+                <span aria-hidden="true">&#9733;</span> {rating.toFixed(1)}
+                <span className="sr-only"> {t('site.rating.outOf5')}</span>
+              </span>
+            ) : (
+              <span className="badge badge-gray">{t('site.rating.new')}</span>
+            )}
+            <span>{tp(t, 'site.rating.reviews', { count: p.reviewCount || 0 })}</span>
+            {where && <><span aria-hidden="true">{'•'}</span><span>{where}</span></>}
           </div>
         </div>
-        <p style={{ fontSize: '0.87rem', color: 'var(--muted)', flex: 1 }} className="mt-1">
-          {p.description ? p.description.slice(0, 110) : p.category?.name || 'Professional services'}
-        </p>
-        <div className="meta">
-          {best ? <span style={{ fontWeight: 700, color: 'var(--ink)' }}>{formatMoney(best.price)}</span> : null}
-          <span style={{ fontWeight: 600, color: 'var(--brand-600)' }}>Book now &rarr;</span>
+        {p.description && <p className="provider-desc">{p.description.length > 110 ? `${p.description.slice(0, 110)}…` : p.description}</p>}
+        <div className="meta provider-card-foot">
+          {prices ? <span className="price-range">{prices}</span> : <span>{t('site.providers.noPrices')}</span>}
+          <span className="provider-cta">{t('common.bookNow')} <span aria-hidden="true">&rarr;</span></span>
         </div>
       </div>
     </Link>

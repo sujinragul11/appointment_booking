@@ -1,0 +1,14 @@
+# Profile "postgres": only used by PostgresBookingSmokeTest, which runs when IT_POSTGRES=true.
+# Point it at a dedicated, disposable database (never booking_db):
+#   psql -h localhost -U postgres -c "CREATE DATABASE booking_it"
+#   IT_POSTGRES=true mvn -B verify
+spring:
+  datasource:
+    url: ${IT_POSTGRES_URL:jdbc:postgresql://localhost:5432/booking_it}
+    username: ${IT_POSTGRES_USER:postgres}
+    password: ${IT_POSTGRES_PASSWORD:postgres}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true

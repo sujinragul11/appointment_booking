@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import PasswordStrength from '../components/PasswordStrength';
+import VerifyCode from '../components/VerifyCode';
+import { InlineLoader } from '../components/Loader';
 import api, { getErrorMessage } from '../api/client';
 import { useT } from '../i18n';
 import { checkPassword } from '../utils/password';
@@ -10,18 +12,18 @@ import { homePathFor, nextFromLocation } from '../utils/routes';
 
 // Same rule as the backend's RegisterRequest: optional +, then 10-15 digits.
 const PHONE_RE = /^\+?[0-9]{10,15}$/;
+const cleanPhone = (v) => String(v || '').replace(/[\s()-]/g, '');
 
 export default function Register() {
-  const { register } = useAuth();
+  const { register, updateUser } = useAuth();
   const t = useT();
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
-  const initialRole = params.get('role') === 'PROVIDER' ? 'PROVIDER' : 'CUSTOMER';
   const next = nextFromLocation(location);
 
-  const [role, setRole] = useState(initialRole);
+  const [role, setRole] = useState(params.get('role') === 'PROVIDER' ? 'PROVIDER' : 'CUSTOMER');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -32,21 +34,32 @@ export default function Register() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [triedSubmit, setTriedSubmit] = useState(false);
+  const [registered, setRegistered] = useState(null);
   const phoneRef = useRef(null);
   const passwordRef = useRef(null);
+  const verifyHeading = useRef(null);
 
   const pw = checkPassword(password);
+  const phoneValue = cleanPhone(phone);
+  const phoneInvalid = phoneValue !== '' && !PHONE_RE.test(phoneValue);
 
   useEffect(() => {
-    if (role === 'PROVIDER') api.get('/categories').then((r) => setCategories(r.data || [])).catch(() => {});
-  }, [role]);
+    if (role === 'PROVIDER' && categories.length === 0) {
+      api.get('/categories').then((r) => setCategories(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    }
+  }, [role, categories.length]);
+
+  useEffect(() => {
+    if (registered) verifyHeading.current?.focus();
+  }, [registered]);
+
+  const finish = (user) => navigate(next || homePathFor(user?.role), { replace: true });
 
   const submit = async (e) => {
     e.preventDefault();
     setError('');
     setTriedSubmit(true);
-    const cleanPhone = phone.replace(/[\s()-]/g, '');
-    if (!PHONE_RE.test(cleanPhone)) {
+    if (phoneInvalid) {
       setError(t('auth.phoneInvalid'));
       phoneRef.current?.focus();
       return;
@@ -58,15 +71,17 @@ export default function Register() {
     }
     setBusy(true);
     const payload = {
-      name: name.trim(), email: email.trim(), phone: cleanPhone, password, role,
-      ...(role === 'PROVIDER' ? { businessName, categoryId: categoryId ? Number(categoryId) : null } : {})
+      name: name.trim(), email: email.trim(), password, role,
+      ...(phoneValue ? { phone: phoneValue } : {}),
+      ...(role === 'PROVIDER' ? { businessName: businessName.trim(), categoryId: categoryId ? Number(categoryId) : null } : {})
     };
     try {
-      // AuthContext stores the tokens returned by /auth/register; no second login round-trip.
+      // AuthContext stores the tokens returned by /auth/register; an e-mail code is on its way.
       const data = await register(payload);
       if (data?.accessToken && data?.user) {
-        toast(`${t('auth.accountCreated')}${data.message ? ` — ${data.message}` : ''}`, 'success');
-        navigate(next || homePathFor(data.user.role), { replace: true });
+        toast(t('auth.accountCreated'), 'success');
+        if (data.user.verified || data.user.emailVerified) finish(data.user);
+        else setRegistered(data.user);
       } else {
         toast(t('auth.accountCreatedSignIn'), 'success');
         navigate(next ? `/login?next=${encodeURIComponent(next)}` : '/login', { replace: true });
@@ -78,15 +93,32 @@ export default function Register() {
     }
   };
 
-  const phoneInvalid = triedSubmit && !PHONE_RE.test(phone.replace(/[\s()-]/g, ''));
+  if (registered) {
+    return (
+      <div className="container page auth-page">
+        <div className="card card-pad auth-card">
+          <h1 ref={verifyHeading} tabIndex={-1} className="auth-title">{t('site.register.verifyTitle')}</h1>
+          <p className="auth-lead">{t('site.register.verifyLead')}</p>
+          <VerifyCode channel="EMAIL" destination={registered.email} alreadySent showTitle={false}
+            onVerified={(user) => {
+              updateUser(user);
+              toast(t('site.verify.done'), 'success');
+              finish(user);
+            }}
+            onCancel={() => finish(registered)} />
+          {registered.role === 'PROVIDER' && <p className="form-note mt-2">{t('auth.providerNote')}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container page" style={{ maxWidth: 520 }}>
-      <div className="card card-pad" style={{ boxShadow: 'var(--shadow)' }}>
-        <h1 style={{ fontSize: '1.6rem', marginBottom: 4 }}>{t('auth.registerTitle')}</h1>
-        <p style={{ color: 'var(--muted)', marginBottom: 20 }}>{t('auth.registerText')}</p>
+    <div className="container page auth-page auth-page-wide">
+      <div className="card card-pad auth-card">
+        <h1 className="auth-title">{t('auth.registerTitle')}</h1>
+        <p className="auth-lead">{t('auth.registerText')}</p>
 
-        <div style={{ display: 'flex', gap: 10, marginBottom: 22, flexWrap: 'wrap' }} role="group" aria-label={t('auth.accountType')}>
+        <div className="chip-row mb-3" role="group" aria-label={t('auth.accountType')}>
           {['CUSTOMER', 'PROVIDER'].map((r) => (
             <button key={r} type="button" className={`chip ${role === r ? 'active' : ''}`} aria-pressed={role === r}
               onClick={() => setRole(r)}>
@@ -100,20 +132,20 @@ export default function Register() {
         <form onSubmit={submit}>
           <div className="field">
             <label htmlFor="reg-name">{t('auth.fullName')}</label>
-            <input id="reg-name" required minLength={2} value={name} onChange={(e) => setName(e.target.value)}
+            <input id="reg-name" required minLength={2} maxLength={100} value={name} onChange={(e) => setName(e.target.value)}
               placeholder={t('auth.namePlaceholder')} autoComplete="name" />
           </div>
           <div className="row">
             <div className="field">
               <label htmlFor="reg-email">{t('auth.email')}</label>
-              <input id="reg-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+              <input id="reg-email" type="email" required maxLength={150} value={email} onChange={(e) => setEmail(e.target.value)}
                 placeholder={t('auth.emailPlaceholder')} autoComplete="email" />
             </div>
             <div className="field">
-              <label htmlFor="reg-phone">{t('auth.phone')}</label>
-              <input id="reg-phone" ref={phoneRef} type="tel" inputMode="tel" required value={phone}
+              <label htmlFor="reg-phone">{t('auth.phone')} <span className="optional">({t('common.optional')})</span></label>
+              <input id="reg-phone" ref={phoneRef} type="tel" inputMode="tel" value={phone}
                 onChange={(e) => setPhone(e.target.value)} placeholder={t('auth.phonePlaceholder')} autoComplete="tel"
-                aria-describedby="reg-phone-hint" aria-invalid={phoneInvalid || undefined} />
+                aria-describedby="reg-phone-hint" aria-invalid={(triedSubmit && phoneInvalid) || undefined} />
               <span className="hint" id="reg-phone-hint">{t('auth.phoneHint')}</span>
             </div>
           </div>
@@ -130,7 +162,7 @@ export default function Register() {
             <>
               <div className="field">
                 <label htmlFor="reg-business">{t('auth.businessName')}</label>
-                <input id="reg-business" required value={businessName} onChange={(e) => setBusinessName(e.target.value)}
+                <input id="reg-business" required maxLength={120} value={businessName} onChange={(e) => setBusinessName(e.target.value)}
                   placeholder={t('auth.businessPlaceholder')} autoComplete="organization" />
               </div>
               <div className="field">
@@ -147,12 +179,13 @@ export default function Register() {
             </>
           )}
 
+          <p className="hint mb-2">{t('site.register.verifyNote')}</p>
           <button className="btn btn-primary btn-block btn-lg" disabled={busy} type="submit">
-            {busy ? t('auth.creatingAccount') : t('auth.createAccount')}
+            {busy ? <><InlineLoader label={t('auth.creatingAccount')} /> {t('auth.creatingAccount')}</> : t('auth.createAccount')}
           </button>
         </form>
 
-        <p style={{ textAlign: 'center', marginTop: 18, color: 'var(--muted)', fontSize: '0.92rem' }}>
+        <p className="auth-foot mt-3">
           {t('auth.haveAccount')} <Link to={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t('auth.signIn')}</Link>
         </p>
       </div>

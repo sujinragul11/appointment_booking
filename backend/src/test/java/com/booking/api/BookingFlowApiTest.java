@@ -569,6 +569,28 @@ class BookingFlowApiTest extends IntegrationTestBase {
         assertThat(book(customerToken, venue).payment().option()).isEqualTo(PaymentOption.PAY_AT_VENUE);
     }
 
+    @Test
+    @Disabled("BUG: PaymentService.markCollected (src/main/java/com/booking/service/PaymentService.java:167-187) accepts a "
+            + "venue collection while the online deposit is still unpaid. It adds the unpaid deposit to the collected amount "
+            + "(records 1000 received, reported as onlineCollected), marks the payment SUCCESS, but leaves the booking PENDING "
+            + "with paymentDueAt set - the provider can then never confirm it ('Waiting for the customer's online payment') "
+            + "and the expiry job skips it. Expected: refuse to collect until the online deposit has been paid.")
+    void venueBalanceCannotBeCollectedBeforeTheOnlineDepositIsPaid() throws Exception {
+        DomainService withDeposit = data.service(provider, "Implant", 60, 0, 1000, s -> s.setDepositPercent(30));
+        Map<String, Object> dep = bookingBody(provider.getId(), withDeposit.getId(), day, "12:00", PaymentMethod.RAZORPAY);
+        dep.put("paymentOption", "DEPOSIT");
+        AppointmentResponse a = book(customerToken, dep);
+        String providerToken = auth.token(provider.getUser());
+
+        post("/api/provider/appointments/" + a.id() + "/collect", providerToken, null)
+                .andExpect(status().isBadRequest());
+
+        AppointmentResponse after = getAppointment(a.id(), customerToken);
+        assertThat(after.paymentStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(after.payment().amount()).isEqualTo(300);
+        assertThat(after.payment().balanceDue()).isEqualTo(700);
+    }
+
     // ------------------------------------------------------------------ online consultations
 
     @Test

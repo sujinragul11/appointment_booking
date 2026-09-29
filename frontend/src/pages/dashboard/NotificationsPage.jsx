@@ -1,80 +1,149 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '../../api/client';
 import AccountNav from '../../components/AccountNav';
+import { InlineLoader } from '../../components/Loader';
 import { useToast } from '../../components/Toast';
 import { emitNotificationsChanged } from '../../hooks/useUnreadCount';
-import { formatDateTime } from '../../utils/format';
+import { useI18n } from '../../i18n';
+import { formatStamp } from '../../utils/bookingCalendar';
+import { tp } from '../../utils/plural';
 
-const ICONS = { BOOKING: '\u{1F4C5}', PAYMENT: '\u{1F4B3}', REVIEW: '✨', REMINDER: '⏰', SYSTEM: '\u{1F4E2}' };
+const ICONS = { BOOKING: '\u{1F4C5}', PAYMENT: '\u{1F4B3}', REVIEW: '✨', REMINDER: '⏰', ADMIN: '\u{1F6E1}', INFO: '\u{1F4E2}' };
 
+/** Only in-app paths are followed; anything else is ignored. */
+const safeLink = (link) => (typeof link === 'string' && link.startsWith('/') && !link.startsWith('//') ? link : null);
+
+/** FR-35: in-app notifications — open, mark read, mark all read, delete. */
 export default function NotificationsPage() {
-  const [items, setItems] = useState(null);
+  const { t, locale } = useI18n();
   const toast = useToast();
+  const navigate = useNavigate();
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [status, setStatus] = useState('');
 
-  const load = () => api.get('/notifications').then((r) => setItems(r.data || [])).catch(() => setItems([]));
-  useEffect(() => { load(); }, []);
+  const load = useCallback(() => {
+    setError('');
+    return api.get('/notifications')
+      .then((r) => setItems(Array.isArray(r.data) ? r.data : []))
+      .catch((e) => { setItems((prev) => prev || []); setError(getErrorMessage(e, t('site.notifications.loadFailed'))); });
+  }, [t]);
+  useEffect(() => { load(); }, [load]);
+
+  const markOne = async (n) => {
+    if (n.read) return true;
+    try {
+      await api.put(`/notifications/${n.id}/read`);
+      setItems((list) => (list || []).map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+      emitNotificationsChanged();
+      return true;
+    } catch (e) {
+      toast(getErrorMessage(e, t('site.notifications.updateFailed')), 'error');
+      return false;
+    }
+  };
+
+  const open = async (n) => {
+    const link = safeLink(n.link);
+    await markOne(n);
+    if (link) navigate(link);
+  };
 
   const markAll = async () => {
     try {
       await api.put('/notifications/read-all');
-      setItems((p) => (p || []).map((n) => ({ ...n, read: true })));
+      setItems((list) => (list || []).map((x) => ({ ...x, read: true })));
       emitNotificationsChanged();
-    } catch (e) { toast(getErrorMessage(e, 'Could not update notifications'), 'error'); }
+      setStatus(t('site.notifications.allRead'));
+    } catch (e) {
+      toast(getErrorMessage(e, t('site.notifications.updateFailed')), 'error');
+    }
   };
 
-  const markOne = async (id) => {
+  const remove = async (n) => {
+    setBusyId(n.id);
     try {
-      await api.put(`/notifications/${id}/read`);
-      setItems((p) => (p || []).map((n) => (n.id === id ? { ...n, read: true } : n)));
+      await api.delete(`/notifications/${n.id}`);
+      setItems((list) => (list || []).filter((x) => x.id !== n.id));
       emitNotificationsChanged();
-    } catch (e) { toast(getErrorMessage(e, 'Could not update the notification'), 'error'); }
+      setStatus(t('site.notifications.deleted', { title: n.title }));
+    } catch (e) {
+      toast(getErrorMessage(e, t('site.notifications.updateFailed')), 'error');
+    } finally {
+      setBusyId(null);
+    }
   };
+
+  const unread = (items || []).filter((n) => !n.read).length;
 
   return (
     <div className="dash">
       <AccountNav />
 
-      <div>
+      <div className="dash-main">
         <div className="section-title">
           <div>
-            <h1 style={{ fontSize: '1.6rem', fontWeight: 800 }}>Notifications</h1>
-            <p>Updates about your bookings</p>
+            <h1 className="dash-title">{t('site.notifications.title')}</h1>
+            <p>{items ? tp(t, 'site.notifications.unreadCount', { count: unread }) : t('site.notifications.lead')}</p>
           </div>
-          {items?.some((n) => !n.read) && (
-            <button type="button" className="btn btn-outline btn-sm" onClick={markAll}>Mark all as read</button>
+          {unread > 0 && (
+            <button type="button" className="btn btn-outline btn-sm" onClick={markAll}>{t('site.notifications.markAll')}</button>
           )}
         </div>
+        <p className="sr-only" role="status" aria-live="polite">{status}</p>
+
+        {error && (
+          <div className="form-error" role="alert">
+            {error}{' '}
+            <button type="button" className="btn btn-outline btn-xs" onClick={load}>{t('common.retry')}</button>
+          </div>
+        )}
 
         {!items ? (
-          <p style={{ color: 'var(--muted)' }}>Loading...</p>
+          <p className="muted-line" role="status"><InlineLoader label={t('common.loading')} /> {t('common.loading')}</p>
         ) : items.length === 0 ? (
-          <div className="empty card card-pad">
-            <div className="empty-ico" aria-hidden="true">{'\u{1F4E2}'}</div>
-            <h2 style={{ fontSize: '1.15rem' }}>Nothing here yet</h2>
-            <p className="mt-1">We'll notify you about bookings, payments and updates.</p>
-          </div>
+          !error && (
+            <div className="empty card card-pad">
+              <div className="empty-ico" aria-hidden="true">{'\u{1F4E2}'}</div>
+              <h2 className="empty-title">{t('site.notifications.empty')}</h2>
+              <p className="mt-1">{t('site.notifications.emptyText')}</p>
+            </div>
+          )
         ) : (
-          <ul className="card plain-list">
-            {items.map((n) => (
-              // Clicking an unread row also marks it read; the button is the keyboard-accessible way.
-              <li key={n.id} className={`list-item notif-item ${!n.read ? 'unread' : ''}`}
-                onClick={() => { if (!n.read) markOne(n.id); }}>
-                <div className="avatar" style={{ width: 40, height: 40 }} aria-hidden="true">{ICONS[n.type] || ICONS.SYSTEM}</div>
-                <div style={{ flex: 1, minWidth: 180 }}>
-                  <div style={{ fontWeight: n.read ? 600 : 800 }}>
-                    {!n.read && <span className="sr-only">Unread: </span>}{n.title}
+          <ul className="card plain-list notif-list">
+            {items.map((n) => {
+              const link = safeLink(n.link);
+              return (
+                <li key={n.id} className={`notif-row ${n.read ? '' : 'unread'}`}>
+                  <span className="avatar notif-ico" aria-hidden="true">{ICONS[n.type] || ICONS.INFO}</span>
+                  <div className="notif-body">
+                    <h2 className="notif-title">
+                      <button type="button" className="notif-open" onClick={() => open(n)}>
+                        {!n.read && <span className="sr-only">{t('site.notifications.unread')}: </span>}
+                        {n.title}
+                        {link && <span className="sr-only"> ({t('site.notifications.opens')})</span>}
+                      </button>
+                    </h2>
+                    {n.message && <p className="notif-message">{n.message}</p>}
+                    <p className="notif-time">{formatStamp(n.createdAt, locale)}</p>
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>{n.message}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: 2 }}>{formatDateTime(n.createdAt)}</div>
-                </div>
-                {!n.read && (
-                  <button type="button" className="btn btn-ghost btn-xs" onClick={(e) => { e.stopPropagation(); markOne(n.id); }}
-                    aria-label={`Mark "${n.title}" as read`}>
-                    Mark read
-                  </button>
-                )}
-              </li>
-            ))}
+                  <div className="notif-actions">
+                    {!n.read && (
+                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => markOne(n)}
+                        aria-label={t('site.notifications.markReadAria', { title: n.title })}>
+                        {t('site.notifications.markRead')}
+                      </button>
+                    )}
+                    <button type="button" className="btn btn-ghost btn-xs danger-text" onClick={() => remove(n)} disabled={busyId === n.id}
+                      aria-label={t('site.notifications.deleteAria', { title: n.title })}>
+                      {busyId === n.id ? <InlineLoader label={t('site.common.working')} /> : t('site.notifications.delete')}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

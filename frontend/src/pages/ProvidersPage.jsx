@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
 import api, { getErrorMessage } from '../api/client';
 import ProviderCard from '../components/ProviderCard';
-import Loader from '../components/Loader';
+import Pager from '../components/Pager';
+import { InlineLoader } from '../components/Loader';
+import { useT } from '../i18n';
+import { todayISO } from '../utils/format';
+import { pageParam, useDebouncedField, useUrlFilters } from '../hooks/useUrlFilters';
+import { tp } from '../utils/plural';
 
 const PAGE_SIZE = 9;
+const SORTS = ['rating', 'reviews', 'newest', 'name'];
+const MODES = ['IN_PERSON', 'ONLINE'];
 
 function findCategory(categories, name) {
   const needle = String(name || '').trim().toLowerCase();
@@ -12,42 +18,54 @@ function findCategory(categories, name) {
   return categories.find((c) => String(c.name || '').toLowerCase() === needle || String(c.slug || '').toLowerCase() === needle) || null;
 }
 
+const sortOf = (params) => {
+  const s = params.get('sort');
+  if (s === 'reviewCount') return 'reviews';
+  return SORTS.includes(s) ? s : 'rating';
+};
+
+/** Maps URL parameters to the GET /providers query. Exported for tests. */
+export function providersQuery(params) {
+  const query = { page: pageParam(params), size: PAGE_SIZE, sort: sortOf(params) };
+  ['q', 'city'].forEach((k) => { const v = (params.get(k) || '').trim(); if (v) query[k] = v; });
+  const categoryId = params.get('categoryId') || params.get('cat');
+  if (/^\d+$/.test(categoryId || '')) query.categoryId = categoryId;
+  const minRating = params.get('minRating');
+  if (minRating && Number(minRating) > 0) query.minRating = Number(minRating);
+  ['minPrice', 'maxPrice'].forEach((k) => {
+    const v = params.get(k);
+    if (v !== null && v !== '' && Number(v) >= 0) query[k] = Number(v);
+  });
+  const date = params.get('date');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date || '')) query.date = date;
+  const mode = params.get('mode');
+  if (MODES.includes(mode)) query.mode = mode;
+  return query;
+}
+
 /**
- * Provider search. The URL is the source of truth:
- *   /providers?q=&city=&categoryId=&minRating=&sort=&page=
- * plus ?category=<name> (home page chips) and legacy ?cat=<id>, both resolved to categoryId.
+ * Provider search (FR-19, FR-49). The URL is the source of truth:
+ *   /providers?q=&category=|categoryId=&city=&minRating=&minPrice=&maxPrice=&date=&mode=&sort=&page=
+ * ?category=<name> (home page chips) and legacy ?cat=<id> are resolved to categoryId.
  */
 export default function ProvidersPage() {
-  const [params, setParams] = useSearchParams();
-  const q = params.get('q') || '';
-  const city = params.get('city') || '';
-  const categoryId = params.get('categoryId') || params.get('cat') || '';
+  const t = useT();
+  const [params, update] = useUrlFilters();
   const categoryName = params.get('category') || '';
-  const minRating = params.get('minRating') || '';
-  const sort = params.get('sort') || 'rating';
-  const page = Math.max(0, parseInt(params.get('page'), 10) || 0);
-
   const [categories, setCategories] = useState(null);
-  const [qInput, setQInput] = useState(q);
-  const [cityInput, setCityInput] = useState(city);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const pushed = useRef({ q, city });
   const requestId = useRef(0);
 
-  const update = useCallback((changes, { replace = false } = {}) => {
-    setParams((prev) => {
-      const next = new URLSearchParams(prev);
-      Object.entries(changes).forEach(([k, v]) => {
-        if (v === '' || v === null || v === undefined) next.delete(k);
-        else next.set(k, String(v));
-      });
-      if (!('page' in changes)) next.delete('page');
-      return next;
-    }, { replace });
-  }, [setParams]);
+  const [q, setQ] = useDebouncedField(params.get('q') || '', (v) => update({ q: v.trim() }, { replace: true }));
+  const [city, setCity] = useDebouncedField(params.get('city') || '', (v) => update({ city: v.trim() }, { replace: true }));
+  const [minPrice, setMinPrice] = useDebouncedField(params.get('minPrice') || '', (v) => update({ minPrice: v }, { replace: true }));
+  const [maxPrice, setMaxPrice] = useDebouncedField(params.get('maxPrice') || '', (v) => update({ maxPrice: v }, { replace: true }));
+
+  const query = providersQuery(params);
+  const queryKey = JSON.stringify(query);
 
   useEffect(() => {
     api.get('/categories')
@@ -60,123 +78,124 @@ export default function ProvidersPage() {
     if (!categoryName || categories === null) return;
     const match = findCategory(categories, categoryName);
     if (match) update({ category: null, cat: null, categoryId: match.id }, { replace: true });
-    else update({ category: null, q: q || categoryName }, { replace: true });
+    else update({ category: null, q: params.get('q') || categoryName }, { replace: true });
   }, [categoryName, categories]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // URL changed from outside (back/forward, links): reflect it in the text boxes.
-  useEffect(() => {
-    if (q !== pushed.current.q) { pushed.current.q = q; setQInput(q); }
-    if (city !== pushed.current.city) { pushed.current.city = city; setCityInput(city); }
-  }, [q, city]);
-
-  // Typing searches after a short pause instead of on every keystroke.
-  useEffect(() => {
-    if (qInput === q && cityInput === city) return undefined;
-    const timer = setTimeout(() => {
-      pushed.current = { q: qInput, city: cityInput };
-      update({ q: qInput, city: cityInput }, { replace: true });
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [qInput, cityInput]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (categoryName) return; // wait until the name is resolved to an id
     const id = ++requestId.current;
-    const search = { sort, page, size: PAGE_SIZE };
-    if (q.trim()) search.q = q.trim();
-    if (city.trim()) search.city = city.trim();
-    if (categoryId) search.categoryId = categoryId;
-    if (minRating) search.minRating = minRating;
     setLoading(true);
     setError('');
-    api.get('/providers', { params: search })
+    api.get('/providers', { params: JSON.parse(queryKey) })
       .then((r) => { if (id === requestId.current) setData(r.data); })
-      .catch((e) => { if (id === requestId.current) setError(getErrorMessage(e, 'Could not load providers')); })
+      .catch((e) => { if (id === requestId.current) setError(getErrorMessage(e, t('site.providers.loadFailed'))); })
       .finally(() => { if (id === requestId.current) setLoading(false); });
-  }, [q, city, categoryId, categoryName, minRating, sort, page, attempt]);
+  }, [queryKey, categoryName, attempt, t]);
 
-  const selectedCategory = categories?.find((c) => String(c.id) === String(categoryId));
-  const hasFilters = Boolean(q || city || categoryId || minRating);
+  const selectedCategory = categories?.find((c) => String(c.id) === String(query.categoryId || ''));
+  const hasFilters = ['q', 'city', 'categoryId', 'cat', 'minRating', 'minPrice', 'maxPrice', 'date', 'mode'].some((k) => params.get(k));
   const content = data?.content || [];
+  const priceProblem = minPrice !== '' && maxPrice !== '' && Number(minPrice) > Number(maxPrice);
 
+  const clear = () => update({ q: null, city: null, categoryId: null, cat: null, minRating: null, minPrice: null, maxPrice: null, date: null, mode: null });
   const goPage = (p) => {
     update({ page: p || null });
     window.scrollTo({ top: 0 });
   };
 
+  const lead = selectedCategory ? t('site.providers.leadCategory', { name: selectedCategory.name })
+    : query.q ? t('site.providers.leadQuery', { q: query.q }) : t('site.providers.lead');
+
   return (
     <div className="container page">
-      <h1 style={{ fontSize: '1.9rem', fontWeight: 800 }}>Browse providers</h1>
-      <p style={{ color: 'var(--muted)', marginTop: 4 }}>
-        {selectedCategory ? `${selectedCategory.name} providers` : q ? `Providers matching "${q}"` : 'Verified professionals ready to help'}
-      </p>
+      <h1 className="page-title">{t('site.providers.title')}</h1>
+      <p className="page-lead">{lead}</p>
 
-      <form className="card card-pad mt-3 filter-bar" role="search" onSubmit={(e) => e.preventDefault()}>
-        <label htmlFor="pf-q" className="sr-only">Search providers</label>
-        <input id="pf-q" type="search" className="filter-control filter-grow" placeholder="Search name, city or service"
-          value={qInput} onChange={(e) => setQInput(e.target.value)} />
-        <label htmlFor="pf-cat" className="sr-only">Category</label>
-        <select id="pf-cat" className="filter-control" value={categoryId}
-          onChange={(e) => update({ categoryId: e.target.value, cat: null })}>
-          <option value="">All categories</option>
-          {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-        </select>
-        <label htmlFor="pf-city" className="sr-only">City</label>
-        <input id="pf-city" className="filter-control" style={{ width: 150 }} placeholder="City" value={cityInput}
-          onChange={(e) => setCityInput(e.target.value)} autoComplete="address-level2" />
-        <label htmlFor="pf-rating" className="sr-only">Minimum rating</label>
-        <select id="pf-rating" className="filter-control" value={minRating} onChange={(e) => update({ minRating: e.target.value })}>
-          <option value="">Any rating</option>
-          <option value="4">4+ stars</option>
-          <option value="3">3+ stars</option>
-        </select>
-        <label htmlFor="pf-sort" className="sr-only">Sort by</label>
-        <select id="pf-sort" className="filter-control" value={sort}
-          onChange={(e) => update({ sort: e.target.value === 'rating' ? null : e.target.value })}>
-          <option value="rating">Top rated</option>
-          <option value="reviewCount">Most reviewed</option>
-          <option value="newest">Newest</option>
-          <option value="name">Name A-Z</option>
-        </select>
+      <form className="card card-pad mt-3 filter-grid" role="search" aria-label={t('site.providers.filters')}
+        onSubmit={(e) => e.preventDefault()}>
+        <div className="field filter-wide">
+          <label htmlFor="pf-q">{t('site.filters.search')}</label>
+          <input id="pf-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('site.providers.searchPlaceholder')} />
+        </div>
+        <div className="field">
+          <label htmlFor="pf-cat">{t('site.filters.category')}</label>
+          <select id="pf-cat" value={query.categoryId || ''} onChange={(e) => update({ categoryId: e.target.value, cat: null })}>
+            <option value="">{t('site.filters.allCategories')}</option>
+            {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="pf-city">{t('site.filters.city')}</label>
+          <input id="pf-city" value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2"
+            placeholder={t('site.filters.cityPlaceholder')} />
+        </div>
+        <div className="field">
+          <label htmlFor="pf-rating">{t('site.filters.minRating')}</label>
+          <select id="pf-rating" value={query.minRating ? String(query.minRating) : ''} onChange={(e) => update({ minRating: e.target.value })}>
+            <option value="">{t('site.filters.anyRating')}</option>
+            {['4.5', '4', '3'].map((r) => <option key={r} value={r}>{t('site.filters.ratingAtLeast', { value: r })}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="pf-min">{t('site.filters.minPrice')}</label>
+          <input id="pf-min" type="number" inputMode="numeric" min="0" step="50" value={minPrice}
+            onChange={(e) => setMinPrice(e.target.value)} aria-describedby={priceProblem ? 'pf-price-error' : undefined} />
+        </div>
+        <div className="field">
+          <label htmlFor="pf-max">{t('site.filters.maxPrice')}</label>
+          <input id="pf-max" type="number" inputMode="numeric" min="0" step="50" value={maxPrice}
+            onChange={(e) => setMaxPrice(e.target.value)} aria-invalid={priceProblem || undefined}
+            aria-describedby={priceProblem ? 'pf-price-error' : undefined} />
+        </div>
+        <div className="field">
+          <label htmlFor="pf-date">{t('site.filters.availableOn')}</label>
+          <input id="pf-date" type="date" min={todayISO()} value={query.date || ''} onChange={(e) => update({ date: e.target.value })} />
+        </div>
+        <div className="field">
+          <label htmlFor="pf-mode">{t('site.filters.mode')}</label>
+          <select id="pf-mode" value={query.mode || ''} onChange={(e) => update({ mode: e.target.value })}>
+            <option value="">{t('site.filters.anyMode')}</option>
+            {MODES.map((m) => <option key={m} value={m}>{t(`site.mode.${m}`)}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="pf-sort">{t('site.filters.sort')}</label>
+          <select id="pf-sort" value={query.sort} onChange={(e) => update({ sort: e.target.value === 'rating' ? null : e.target.value })}>
+            {SORTS.map((s) => <option key={s} value={s}>{t(`site.providers.sort.${s}`)}</option>)}
+          </select>
+        </div>
         {hasFilters && (
-          <button type="button" className="btn btn-ghost btn-sm"
-            onClick={() => update({ q: null, city: null, categoryId: null, cat: null, minRating: null })}>
-            Clear filters
-          </button>
+          <div className="filter-actions">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={clear}>{t('site.filters.clear')}</button>
+          </div>
         )}
+        {priceProblem && <p className="hint error-text filter-full" id="pf-price-error">{t('site.filters.priceOrder')}</p>}
       </form>
 
-      <p className="sr-only" role="status">
-        {loading ? 'Searching…' : data ? `${data.totalElements ?? content.length} providers found` : ''}
+      <p className="results-status" role="status" aria-live="polite">
+        {loading ? t('site.filters.searching') : data ? tp(t, 'site.providers.found', { count: data.totalElements ?? content.length }) : ''}
       </p>
 
       {error ? (
-        <div className="form-error mt-3" role="alert">
+        <div className="form-error" role="alert">
           {error}{' '}
-          <button type="button" className="btn btn-outline btn-xs" onClick={() => setAttempt((n) => n + 1)}>Try again</button>
+          <button type="button" className="btn btn-outline btn-xs" onClick={() => setAttempt((n) => n + 1)}>{t('common.retry')}</button>
         </div>
       ) : !data ? (
-        <div className="mt-3"><Loader /></div>
+        <p className="muted-line"><InlineLoader label={t('common.loading')} /> {t('common.loading')}</p>
       ) : content.length === 0 ? (
-        <div className="empty mt-3">
+        <div className="empty card card-pad">
           <div className="empty-ico" aria-hidden="true">{'\u{1F50D}'}</div>
-          <h2 style={{ fontSize: '1.2rem' }}>No providers found</h2>
-          <p className="mt-1">Try adjusting your search filters.</p>
+          <h2 className="empty-title">{t('site.providers.none')}</h2>
+          <p className="mt-1">{t('site.filters.tryAdjusting')}</p>
+          {hasFilters && <button type="button" className="btn btn-outline mt-2" onClick={clear}>{t('site.filters.clear')}</button>}
         </div>
       ) : (
         <>
-          <div className="grid grid-3 mt-3" aria-busy={loading} style={{ opacity: loading ? 0.6 : 1 }}>
-            {content.map((p) => <ProviderCard key={p.id} p={p} />)}
-          </div>
-          {data.totalPages > 1 && (
-            <nav className="pager mt-4" aria-label="Pagination">
-              <button type="button" className="btn btn-outline btn-sm" disabled={page === 0} onClick={() => goPage(page - 1)}>&larr; Prev</button>
-              <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-                Page {(data.page ?? page) + 1} of {data.totalPages} ({data.totalElements} providers)
-              </span>
-              <button type="button" className="btn btn-outline btn-sm" disabled={page + 1 >= data.totalPages} onClick={() => goPage(page + 1)}>Next &rarr;</button>
-            </nav>
-          )}
+          <ul className="grid grid-3 plain-grid card-grid" aria-busy={loading || undefined} style={{ opacity: loading ? 0.6 : 1 }}>
+            {content.map((p) => <li key={p.id}><ProviderCard p={p} headingLevel={2} /></li>)}
+          </ul>
+          <Pager page={data.page ?? query.page} totalPages={data.totalPages} totalElements={data.totalElements} onChange={goPage} />
         </>
       )}
     </div>

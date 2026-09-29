@@ -1,496 +1,700 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import api, { getErrorMessage } from '../api/client';
+import { holdSlot, releaseHold } from '../api/site';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Loader, { InlineLoader } from '../components/Loader';
-import Modal from '../components/Modal';
 import Calendar from '../components/Calendar';
+import SlotPicker from '../components/SlotPicker';
+import Countdown from '../components/Countdown';
+import ModeBadge from '../components/ModeBadge';
+import VerifyCode from '../components/VerifyCode';
+import { usePayment } from '../components/PaymentDialog';
+import useSiteConfig from '../hooks/useSiteConfig';
 import { useI18n } from '../i18n';
+import { addDaysISO, formatMoney, isValidTimeZone, parseISODate, timeZoneLabel } from '../utils/format';
 import {
-  addDaysISO, formatMoney, formatTime, isValidTimeZone, nextDays, parseISODate, timeZoneLabel, todayISO
-} from '../utils/format';
+  bookingWindow, closedDayChecker, firstOpenDate, formatClock, formatDay, hhmm, viewerClock
+} from '../utils/bookingCalendar';
+import { localDeadline } from '../utils/countdown';
 import { loginPath } from '../utils/routes';
-import { isOpenSlot, parseSlots } from '../utils/slots';
+import { tp } from '../utils/plural';
 
 const isActive = (x) => x && x.active !== false;
-const DAY_NUMBERS = { MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3, THURSDAY: 4, FRIDAY: 5, SATURDAY: 6, SUNDAY: 7 };
-// Java DayOfWeek numbering (1 = Monday ... 7 = Sunday); also accepts enum names. null if unknown.
-const dayNumber = (v) => {
-  const n = Number(v);
-  return n >= 1 && n <= 7 ? n : DAY_NUMBERS[String(v).toUpperCase()] || null;
-};
-const slotKey = (s) => (s ? s.id ?? `${s.startTime}-${s.staffId ?? ''}` : null);
-const isWideScreen = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-  && window.matchMedia('(min-width: 768px)').matches;
+const MODES = ['IN_PERSON', 'ONLINE'];
+const NOTES_MAX = 1000;
+const round2 = (n) => Math.round(n * 100) / 100;
 
+/** Amounts shown in the summary; mirrors what POST /appointments will charge. */
+export function priceSummary({ price = 0, discount = 0, method, option, depositPercent = 0 }) {
+  const total = Math.max(0, round2(price - discount));
+  const online = method === 'RAZORPAY' && total > 0;
+  const payNow = !online ? 0 : option === 'DEPOSIT' ? round2(total * depositPercent / 100) : total;
+  return { total, payNow, atVenue: round2(total - payNow) };
+}
+
+/**
+ * Booking wizard (FR-20..26): service -> team member -> format -> date & time -> details -> confirm.
+ * The URL carries the choices (/book/:providerId/:serviceId?staff=&mode=&date=&time=) so a guest who
+ * must sign in first comes back to the same selection. Picking a time holds it for 10 minutes.
+ */
 export default function BookingWizard() {
   const { providerId, serviceId } = useParams();
-  const { user } = useAuth();
-  const { locale } = useI18n();
+  const [params, setParams] = useSearchParams();
+  const { user, updateUser } = useAuth();
+  const { t, locale } = useI18n();
   const navigate = useNavigate();
-  const location = useLocation();
   const toast = useToast();
+  const config = useSiteConfig();
 
   const [provider, setProvider] = useState(null);
-  const [avail, setAvail] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [serviceIdSel, setServiceIdSel] = useState(Number(serviceId));
-  const [staffId, setStaffId] = useState('');
-  const [date, setDate] = useState(todayISO);
-  const [showCalendar, setShowCalendar] = useState(isWideScreen);
-  const [slots, setSlots] = useState(null);
-  const [slotsError, setSlotsError] = useState('');
-  const [closedMessage, setClosedMessage] = useState('');
-  const [slot, setSlot] = useState(null);
-  const [coupon, setCoupon] = useState('');
-  const [couponInfo, setCouponInfo] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [bundle, setBundle] = useState(undefined);
+  const [attempt, setAttempt] = useState(0);
+  const [slotsState, setSlotsState] = useState({ key: '', slots: null, message: '', error: '' });
+  const [slotNotice, setSlotNotice] = useState(null);
+  const [hold, setHold] = useState(null);
+  const [holding, setHolding] = useState(null);
+  const [notes, setNotes] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [coupon, setCoupon] = useState(null);
   const [couponError, setCouponError] = useState('');
   const [couponBusy, setCouponBusy] = useState(false);
-  const [method, setMethod] = useState('PAY_AT_VENUE');
-  const [notes, setNotes] = useState('');
+  const [methodChoice, setMethodChoice] = useState(null);
+  const [optionChoice, setOptionChoice] = useState('FULL');
   const [busy, setBusy] = useState(false);
-  const [payModal, setPayModal] = useState(null);
+  const [bookError, setBookError] = useState('');
+  const [needsVerify, setNeedsVerify] = useState(false);
+  const [announcement, setAnnouncement] = useState('');
+
   const slotRequest = useRef(0);
+  const holdRef = useRef(null);
+  const keyRef = useRef('');
+  const bookedRef = useRef(false);
+  const pendingTime = useRef(params.get('time'));
   const couponRef = useRef('');
+  const slotsHeading = useRef(null);
+  holdRef.current = hold;
+
+  /* ---------- data ---------- */
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    setLoadError(null);
     api.get(`/providers/${providerId}`)
       .then((r) => { if (active) setProvider(r.data); })
-      .catch(() => { if (active) setProvider(null); })
-      .finally(() => { if (active) setLoading(false); });
-    // Working hours are only used to grey out closed days; the slot search is authoritative.
+      .catch((e) => { if (active) setLoadError({ status: e?.response?.status, message: getErrorMessage(e) }); });
+    // Working hours only grey out closed days; the slot search is authoritative.
     api.get(`/providers/${providerId}/availability`)
-      .then((r) => { if (active) setAvail(r.data); })
-      .catch(() => {});
+      .then((r) => { if (active) setBundle(r.data); })
+      .catch(() => { if (active) setBundle(null); });
     return () => { active = false; };
-  }, [providerId]);
+  }, [providerId, attempt]);
 
-  // Inactive services and staff can't be booked.
   const services = useMemo(() => (provider?.services || []).filter(isActive), [provider]);
-  const svc = useMemo(() => services.find((s) => s.id === Number(serviceIdSel)), [services, serviceIdSel]);
-  const staffOptions = useMemo(
-    () => (provider?.staff || []).filter(isActive).filter((s) => !svc || (svc.staffIds || []).includes(s.id)),
-    [provider, svc]
+  const svc = useMemo(() => services.find((s) => String(s.id) === String(serviceId)), [services, serviceId]);
+  const staffOptions = useMemo(() => {
+    const ids = (svc?.staffIds || []).map(String);
+    return ids.length ? (provider?.staff || []).filter((s) => isActive(s) && ids.includes(String(s.id))) : [];
+  }, [provider, svc]);
+
+  const staffParam = params.get('staff') || '';
+  const staffId = staffOptions.some((s) => String(s.id) === staffParam) ? staffParam : '';
+  const modeParam = params.get('mode');
+  const mode = svc?.mode === 'BOTH' ? (MODES.includes(modeParam) ? modeParam : 'IN_PERSON') : svc?.mode;
+  const tz = isValidTimeZone(provider?.timezone) ? provider.timezone : null;
+  const { today, maxDate } = bookingWindow(tz, svc?.maxAdvanceBookingDays);
+  const staffIdsForDays = useMemo(
+    () => (staffId ? [staffId] : (svc?.staffIds || []).filter((id) => staffOptions.some((s) => String(s.id) === String(id)))),
+    [staffId, svc, staffOptions]
   );
+  const isClosed = useMemo(() => closedDayChecker(bundle, staffIdsForDays), [bundle, staffIdsForDays]);
+  const isDateOff = useCallback((iso) => iso < today || iso > maxDate || isClosed(iso), [today, maxDate, isClosed]);
+  const dateParam = params.get('date');
+  const date = parseISODate(dateParam) && !isDateOff(dateParam) ? dateParam : firstOpenDate(today, maxDate, isDateOff);
+  const slotKey = `${svc?.id || ''}|${staffId}|${date || ''}`;
+  keyRef.current = slotKey;
 
   // The service in the URL may be inactive or gone: fall back to the first bookable one.
   useEffect(() => {
-    if (provider && !svc && services.length) setServiceIdSel(services[0].id);
-  }, [provider, svc, services]);
+    if (provider && !svc && services.length) {
+      navigate({ pathname: `/book/${providerId}/${services[0].id}`, search: params.toString() }, { replace: true });
+    }
+  }, [provider, svc, services]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A team member who doesn't offer the chosen service can't stay selected.
-  useEffect(() => {
-    if (staffId && !staffOptions.some((s) => String(s.id) === String(staffId))) setStaffId('');
-  }, [staffOptions, staffId]);
-
-  const today = todayISO();
-  const maxDays = (svc?.maxAdvanceBookingDays > 0 ? svc.maxAdvanceBookingDays
-    : provider?.policy?.maxAdvanceBookingDays ?? provider?.maxAdvanceBookingDays) || 30;
-  const maxDate = addDaysISO(today, maxDays);
-  const days = useMemo(() => nextDays(7, 0), [today]);
-  const tz = isValidTimeZone(provider?.timezone) ? provider.timezone : null;
-
-  const hours = useMemo(() => ({
-    openDays: new Set((avail?.availability || []).filter(isActive).map((a) => dayNumber(a.dayOfWeek)).filter(Boolean)),
-    overrides: new Map((avail?.overrides || []).map((o) => [String(o.date), o.available !== false]))
-  }), [avail]);
-
-  const isDateDisabled = useCallback((iso) => {
-    if (iso < today || iso > maxDate) return true;
-    if (hours.overrides.has(iso)) return !hours.overrides.get(iso);
-    if (hours.openDays.size === 0) return false; // hours unknown: let the slot search decide
-    const dow = parseISODate(iso).getDay();
-    return !hours.openDays.has(dow === 0 ? 7 : dow);
-  }, [today, maxDate, hours]);
-
-  // Start on the first open day (today may be closed).
-  useEffect(() => {
-    if (!provider || !isDateDisabled(date)) return;
-    let d = today;
-    for (let i = 0; i < maxDays && isDateDisabled(d); i++) d = addDaysISO(d, 1);
-    if (!isDateDisabled(d)) setDate(d);
-  }, [provider, isDateDisabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setQuery = useCallback((changes) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(changes).forEach(([k, v]) => {
+        if (v === '' || v === null || v === undefined) next.delete(k);
+        else next.set(k, String(v));
+      });
+      return next;
+    }, { replace: true });
+  }, [setParams]);
 
   const loadSlots = useCallback(async () => {
-    // Only the latest request may update state: switching dates quickly must not let an
-    // older, slower response overwrite the slots of the date now selected.
     const id = ++slotRequest.current;
-    setSlot(null);
-    setSlotsError('');
-    setClosedMessage('');
-    setSlots(null);
+    const key = `${svc?.id || ''}|${staffId}|${date || ''}`;
+    setSlotsState({ key, slots: null, message: '', error: '' });
     if (!svc || !date) return;
     try {
       const { data } = await api.get('/slots', {
         params: { providerId, serviceId: svc.id, staffId: staffId || undefined, date }
       });
       if (id !== slotRequest.current) return;
-      const parsed = parseSlots(data);
-      setSlots(parsed.slots);
-      setClosedMessage(parsed.message);
+      const slots = Array.isArray(data?.slots) ? data.slots : Array.isArray(data) ? data : [];
+      setSlotsState({ key, slots, message: data?.message || '', error: '' });
     } catch (e) {
-      if (id === slotRequest.current) {
-        setSlots([]);
-        setSlotsError(getErrorMessage(e, 'Could not load available times.'));
-      }
+      if (id === slotRequest.current) setSlotsState({ key, slots: [], message: '', error: getErrorMessage(e, t('site.slots.loadFailed')) });
     }
-  }, [providerId, svc, staffId, date]);
+  }, [providerId, svc, staffId, date, t]);
 
   useEffect(() => {
-    if (user && provider) loadSlots();
-  }, [user, provider, loadSlots]);
+    if (provider && svc && bundle !== undefined) loadSlots();
+  }, [provider, svc, bundle, loadSlots]);
+
+  // A hold belongs to one service / team member / date: release it when any of them changes.
+  useEffect(() => {
+    const current = holdRef.current;
+    if (current && current.key !== slotKey) {
+      releaseHold(current.holdToken);
+      setHold(null);
+    }
+  }, [slotKey]);
+
+  // Leaving the page gives the held time back (unless it was just booked).
+  useEffect(() => () => {
+    const current = holdRef.current;
+    if (current && !bookedRef.current) releaseHold(current.holdToken);
+  }, []);
+
+  /* ---------- choices ---------- */
+
+  const changeSelection = (changes) => {
+    pendingTime.current = null;
+    setSlotNotice(null);
+    setBookError('');
+    setQuery({ ...changes, time: null });
+  };
+
+  const chooseService = (id) => {
+    if (String(id) === String(serviceId)) return;
+    pendingTime.current = null;
+    setSlotNotice(null);
+    setBookError('');
+    setCoupon(null);
+    setCouponError('');
+    setOptionChoice('FULL');
+    const next = new URLSearchParams(params);
+    ['time', 'mode'].forEach((k) => next.delete(k));
+    navigate({ pathname: `/book/${providerId}/${id}`, search: next.toString() }, { replace: true });
+  };
+
+  const selectSlot = useCallback(async (slot) => {
+    if (!svc || !date) return;
+    const time = hhmm(slot.startTime);
+    if (!user) {
+      const next = new URLSearchParams(params);
+      next.set('date', date);
+      next.set('time', time);
+      const here = `/book/${providerId}/${svc.id}?${next.toString()}`;
+      navigate(loginPath(here), { state: { from: here, notice: t('site.booking.signInToBook') } });
+      return;
+    }
+    if (user.role !== 'CUSTOMER') {
+      setSlotNotice({ type: 'error', text: t('site.booking.customersOnly') });
+      return;
+    }
+    const key = keyRef.current;
+    const previous = holdRef.current;
+    if (previous && previous.key === key && hhmm(previous.startTime) === time) return;
+    setHolding(slot.startTime);
+    setSlotNotice(null);
+    setBookError('');
+    if (previous) {
+      setHold(null);
+      releaseHold(previous.holdToken);
+    }
+    try {
+      const data = await holdSlot({
+        providerId: Number(providerId), serviceId: svc.id, staffId: staffId ? Number(staffId) : null, date, startTime: slot.startTime
+      });
+      if (keyRef.current !== key) { // the selection changed while the request was in flight
+        releaseHold(data.holdToken);
+        return;
+      }
+      setHold({ ...data, key, startAt: slot.startAt, deadline: localDeadline(data.expiresAt, data.serverDate) });
+      setQuery({ date, time });
+      setAnnouncement(t('site.booking.heldAnnounce', { time: formatClock(slot.startTime, locale) }));
+    } catch (e) {
+      const status = e?.response?.status;
+      if (status === 409) {
+        setSlotNotice({ type: 'error', text: t('site.booking.slotTaken') });
+        loadSlots();
+      } else {
+        setSlotNotice({ type: 'error', text: getErrorMessage(e, t('site.booking.holdFailed')) });
+      }
+    } finally {
+      setHolding(null);
+    }
+  }, [svc, date, user, params, providerId, navigate, t, staffId, setQuery, locale, loadSlots]);
+
+  // Coming back from sign-in with ?time=: pick that time again if it is still free.
+  useEffect(() => {
+    const wanted = pendingTime.current;
+    if (!wanted || !user || slotsState.key !== slotKey || !Array.isArray(slotsState.slots)) return;
+    pendingTime.current = null;
+    if (user.role !== 'CUSTOMER') return;
+    const slot = slotsState.slots.find((s) => hhmm(s.startTime) === hhmm(wanted));
+    if (slot && (slot.status === 'AVAILABLE' || !slot.status)) selectSlot(slot);
+    else setSlotNotice({ type: 'info', text: t('site.booking.restoreGone', { time: formatClock(wanted, locale) }) });
+  }, [slotsState, slotKey, user, selectSlot, t, locale]);
+
+  // The first open day may have no times left (e.g. late today): move on to the next open day,
+  // but only while the customer has not picked a date themselves.
+  const autoAdvanced = useRef(false);
+  useEffect(() => {
+    if (autoAdvanced.current || dateParam || pendingTime.current || !date) return;
+    if (slotsState.key !== slotKey || !Array.isArray(slotsState.slots) || slotsState.error) return;
+    autoAdvanced.current = true;
+    if (slotsState.slots.some((s) => s.status === 'AVAILABLE' || !s.status)) return;
+    const next = firstOpenDate(addDaysISO(date, 1), maxDate, isDateOff);
+    if (next) setQuery({ date: next });
+  }, [slotsState, slotKey, dateParam, date, maxDate, isDateOff, setQuery]);
+
+  const onHoldExpired = useCallback(() => {
+    if (!holdRef.current) return;
+    setHold(null);
+    setQuery({ time: null });
+    setSlotNotice({ type: 'info', text: t('site.booking.holdExpired') });
+    loadSlots();
+  }, [setQuery, t, loadSlots]);
+
+  /* ---------- details ---------- */
 
   const onCouponChange = (value) => {
-    const code = value.toUpperCase();
+    const code = value.toUpperCase().replace(/\s/g, '');
     couponRef.current = code;
-    setCoupon(code);
-    // An applied discount belongs to the code it was validated for.
-    setCouponInfo(null);
+    setCouponCode(code);
+    setCoupon(null); // an applied discount belongs to the code it was validated for
     setCouponError('');
   };
 
   const applyCoupon = async () => {
-    const code = coupon.trim();
-    if (!code) { setCouponInfo(null); setCouponError(''); return; }
+    const code = couponCode.trim();
+    if (!code || !svc) return;
     setCouponBusy(true);
+    setCouponError('');
     try {
-      const { data } = await api.get('/coupons/validate', { params: { code, amount: svc ? svc.price : 0 } });
-      if (couponRef.current.trim() !== code) return; // edited while validating
-      setCouponInfo(data);
-      setCouponError(data.valid ? '' : data.message || 'This coupon cannot be applied.');
-      if (data.valid) toast(`Coupon applied: save ${formatMoney(data.discount)}`, 'success');
+      const { data } = await api.get('/coupons/validate', { params: { code, amount: svc.price } });
+      if (couponRef.current !== code) return; // edited while validating
+      if (data?.valid === false) {
+        setCoupon(null);
+        setCouponError(data.message || t('site.booking.couponInvalid'));
+      } else {
+        setCoupon({ ...data, code: data?.code || code });
+      }
     } catch (e) {
-      if (couponRef.current.trim() !== code) return;
-      setCouponInfo(null);
-      setCouponError(getErrorMessage(e, 'Could not validate the coupon.'));
+      if (couponRef.current !== code) return;
+      setCoupon(null);
+      setCouponError(getErrorMessage(e, t('site.booking.couponInvalid')));
     } finally {
       setCouponBusy(false);
     }
   };
 
-  const discount = couponInfo?.valid ? Number(couponInfo.discount) || 0 : 0;
-  const finalAmount = svc ? Math.max(0, svc.price - discount) : 0;
+  const onlineAvailable = config ? config.onlinePayments !== false : true;
+  const method = mode === 'ONLINE' ? 'RAZORPAY' : !onlineAvailable ? 'PAY_AT_VENUE' : (methodChoice || 'PAY_AT_VENUE');
+  const depositPercent = Number(svc?.depositPercent || 0);
+  const depositAllowed = method === 'RAZORPAY' && depositPercent > 0 && depositPercent < 100;
+  const option = depositAllowed ? optionChoice : 'FULL';
+  const discount = coupon ? Number(coupon.discount) || 0 : 0;
+  const amounts = priceSummary({ price: Number(svc?.price || 0), discount, method, option, depositPercent });
+  const cannotPay = mode === 'ONLINE' && !onlineAvailable;
 
-  const createBooking = async () => {
-    if (!slot || !svc || busy) return;
+  /* ---------- booking ---------- */
+
+  const payment = usePayment({
+    onPaid: (id) => {
+      toast(t('site.payment.success'), 'success');
+      navigate(`/book/success/${id}`, { replace: true });
+    },
+    onDismiss: (id) => navigate(`/appointments/${id}`, { replace: true, state: { notice: t('site.payment.reservedNotice') } }),
+    onError: (e, id) => navigate(`/appointments/${id}`, {
+      replace: true, state: { notice: t('site.payment.startFailed', { reason: getErrorMessage(e, t('site.payment.failed')) }) }
+    })
+  });
+
+  const confirm = async () => {
+    const current = holdRef.current;
+    if (!current || !svc || busy) return;
     setBusy(true);
+    setBookError('');
     const payload = {
       providerId: Number(providerId),
       serviceId: svc.id,
       staffId: staffId ? Number(staffId) : null,
-      date, startTime: slot.startTime, endTime: slot.endTime,
-      notes: notes || null,
-      couponCode: couponInfo?.valid && coupon.trim() ? coupon.trim() : null,
-      paymentMethod: method
+      date: current.date || date,
+      startTime: current.startTime,
+      notes: notes.trim() || null,
+      couponCode: coupon ? coupon.code : null,
+      paymentMethod: method,
+      paymentOption: method === 'RAZORPAY' ? option : null,
+      mode,
+      holdToken: current.holdToken
     };
-
     let appointment;
     try {
       appointment = (await api.post('/appointments', payload)).data;
     } catch (e) {
-      toast(getErrorMessage(e, 'Booking failed'), 'error');
+      const status = e?.response?.status;
+      const message = getErrorMessage(e, t('site.booking.failed'));
+      if (status === 403 && /verif/i.test(message)) {
+        setNeedsVerify(true);
+      } else if (status === 409) {
+        releaseHold(current.holdToken);
+        setHold(null);
+        setQuery({ time: null });
+        setSlotNotice({ type: 'error', text: message || t('site.booking.slotTaken') });
+        loadSlots();
+        slotsHeading.current?.focus();
+      } else {
+        setBookError(message);
+      }
       setBusy(false);
-      loadSlots(); // the slot may have just been taken
       return;
     }
-
-    if (method === 'PAY_AT_VENUE') {
-      toast('Appointment booked successfully!', 'success');
+    bookedRef.current = true;
+    setHold(null);
+    setBusy(false);
+    const needsPayment = method === 'RAZORPAY' && (appointment.actions?.canPay
+      || (appointment.payment?.status === 'PENDING' && appointment.paymentDueAt));
+    if (needsPayment) {
+      payment.start(appointment.id);
+    } else {
+      toast(t('site.booking.booked'), 'success');
       navigate(`/book/success/${appointment.id}`, { replace: true });
-      return;
-    }
-
-    try {
-      const order = (await api.post('/payments/create-order', null, { params: { appointmentId: appointment.id } })).data;
-      setPayModal({ appointment, order });
-    } catch (e) {
-      // The booking exists; only the payment could not start. Don't report it as a failed booking.
-      const notice = `Booking ${appointment.bookingRef || ''} is reserved, but the payment could not be started`
-        + ` (${getErrorMessage(e, 'payment service unavailable')}). You can pay or cancel it here.`;
-      toast('Booking reserved — payment could not be started', 'error');
-      navigate(`/appointments/${appointment.id}`, { replace: true, state: { notice } });
-    } finally {
-      setBusy(false);
     }
   };
 
-  const confirmPay = async () => {
-    if (!payModal || busy) return;
-    setBusy(true);
-    try {
-      await api.post('/payments/verify', {
-        appointmentId: payModal.appointment.id,
-        method: 'RAZORPAY',
-        orderId: payModal.order.orderId,
-        razorpayPaymentId: 'pay_demo_' + Date.now()
-      });
-      toast('Payment successful! Appointment confirmed.', 'success');
-      navigate(`/book/success/${payModal.appointment.id}`, { replace: true });
-    } catch (e) {
-      toast(getErrorMessage(e, 'Payment failed'), 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
+  // Retried after an inline e-mail verification; a ref so the callback always calls the latest version.
+  const confirmRef = useRef(confirm);
+  confirmRef.current = confirm;
 
-  // Only the explicit "Cancel payment" button releases the booking.
-  const cancelPay = async () => {
-    if (!payModal || busy) return;
-    setBusy(true);
-    try {
-      await api.post(`/payments/${payModal.appointment.id}/fail`);
-      toast('Payment cancelled. Booking released.', 'info');
-      setPayModal(null);
-      loadSlots();
-    } catch (e) {
-      toast(getErrorMessage(e, 'Could not cancel the payment'), 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
+  /* ---------- render ---------- */
 
-  // Closing the dialog (X / Escape) keeps the booking; it can be paid or cancelled from its page.
-  const leavePayment = () => {
-    if (!payModal || busy) return;
-    const { appointment } = payModal;
-    navigate(`/appointments/${appointment.id}`, {
-      replace: true,
-      state: { notice: `Booking ${appointment.bookingRef || ''} is reserved but not paid yet. Pay now or cancel it here.` }
-    });
-  };
-
-  if (loading) return <Loader />;
-  if (!provider) return <div className="container page"><div className="empty">Provider not found.</div></div>;
-  if (!user) {
-    const here = location.pathname + location.search;
+  if (loadError) {
     return (
-      <div className="container page" style={{ maxWidth: 520, textAlign: 'center' }}>
-        <h1 style={{ fontSize: '1.5rem' }}>Sign in to book</h1>
-        <p style={{ color: 'var(--muted)', marginTop: 8 }}>You'll need an account to book an appointment.</p>
-        <Link className="btn btn-primary mt-3" to={loginPath(here)} state={{ from: here }}>Sign in</Link>
-      </div>
-    );
-  }
-
-  if (services.length === 0) {
-    return (
-      <div className="container page" style={{ maxWidth: 560 }}>
-        <Link to={`/providers/${providerId}`} className="link-more" style={{ fontSize: '0.9rem' }}>&larr; {provider.businessName}</Link>
-        <div className="empty card card-pad mt-2">
-          <h1 style={{ fontSize: '1.3rem' }}>No bookable services</h1>
-          <p className="mt-1">{provider.businessName} isn't taking online bookings right now.</p>
+      <div className="container page">
+        <div className="empty card card-pad">
+          <h1 className="empty-title">{loadError.status === 404 ? t('site.provider.notFound') : t('site.provider.loadFailed')}</h1>
+          <p className="mt-1">{loadError.status === 404 ? t('site.provider.notFoundText') : loadError.message}</p>
+          <div className="btn-row center-row mt-3">
+            {loadError.status !== 404 && <button type="button" className="btn btn-primary" onClick={() => setAttempt((n) => n + 1)}>{t('common.retry')}</button>}
+            <Link className="btn btn-outline" to="/providers">{t('site.nav.providers')}</Link>
+          </div>
         </div>
       </div>
     );
   }
+  if (!provider) return <Loader label={t('common.loading')} />;
 
-  const available = (slots || []).filter(isOpenSlot);
-  const showStaff = staffOptions.length > 0;
-  const whenStep = showStaff ? 3 : 2;
-  const dateLabel = parseISODate(date)?.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' }) || date;
-  const slotStatus = slots === null ? 'Loading available times' : slotsError
-    ? slotsError : `${available.length} time${available.length === 1 ? '' : 's'} available on ${dateLabel}`;
+  if (services.length === 0) {
+    return (
+      <div className="container page narrow-page">
+        <Link to={`/providers/${providerId}`} className="link-more back-link"><span aria-hidden="true">&larr;</span> {provider.businessName}</Link>
+        <div className="empty card card-pad mt-2">
+          <h1 className="empty-title">{t('site.booking.noServices')}</h1>
+          <p className="mt-1">{t('site.booking.noServicesText', { name: provider.businessName })}</p>
+        </div>
+      </div>
+    );
+  }
+  if (!svc) return <Loader label={t('common.loading')} />;
+
+  const steps = ['service', staffOptions.length > 0 && 'staff', svc.mode === 'BOTH' && 'mode', 'when', 'details'].filter(Boolean);
+  const stepNo = (id) => steps.indexOf(id) + 1;
+  const selectedStaff = staffOptions.find((s) => String(s.id) === String(hold?.staffId ?? staffId));
+  const heldSlot = hold ? (slotsState.slots || []).find((s) => hhmm(s.startTime) === hhmm(hold.startTime)) : null;
+  const localHeld = hold ? viewerClock(hold.startAt || heldSlot?.startAt, tz, locale) : '';
+  const zone = tz ? timeZoneLabel(tz, parseISODate(date || today) || new Date()) : '';
+  const verified = Boolean(user?.verified || user?.emailVerified);
+  const isCustomer = user?.role === 'CUSTOMER';
+  const slotsReady = slotsState.key === slotKey;
+  const confirmLabel = method === 'RAZORPAY' && amounts.payNow > 0
+    ? t('site.booking.confirmPay', { amount: formatMoney(amounts.payNow) }) : t('site.booking.confirm');
 
   return (
     <div className="container page">
-      <Link to={`/providers/${providerId}`} className="link-more" style={{ fontSize: '0.9rem' }}>&larr; {provider.businessName}</Link>
-      <h1 style={{ fontSize: '1.8rem', fontWeight: 800, marginTop: 8 }}>Book your appointment</h1>
+      <Link to={`/providers/${providerId}`} className="link-more back-link"><span aria-hidden="true">&larr;</span> {provider.businessName}</Link>
+      <h1 className="page-title mt-1">{t('site.booking.title')}</h1>
+      <p className="page-lead">
+        {provider.businessName}
+        {tz && <> · {t('site.provider.timesIn', { zone, tz })}</>}
+      </p>
+      <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
+
+      {user && !isCustomer && (
+        <div className="form-note mt-2" role="note">{t('site.booking.customersOnly')}</div>
+      )}
 
       <div className="booking-grid mt-3">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+        <div className="booking-steps">
           <section className="card card-pad" aria-labelledby="step-service">
-            <h2 id="step-service" className="step-title">1. Choose a service</h2>
-            <div role="radiogroup" aria-labelledby="step-service" style={{ display: 'flex', flexDirection: 'column' }}>
+            <h2 id="step-service" className="step-title"><span className="step-num" aria-hidden="true">{stepNo('service')}</span> {t('site.booking.stepService')}</h2>
+            <fieldset className="plain-fieldset">
+              <legend className="sr-only">{t('site.booking.stepService')}</legend>
               {services.map((s) => {
-                const checked = svc?.id === s.id;
+                const checked = svc.id === s.id;
                 return (
                   <label key={s.id} className={`list-item service-option ${checked ? 'selected' : ''}`}>
-                    <input type="radio" name="svc" checked={checked}
-                      onChange={() => { setServiceIdSel(s.id); setCouponInfo(null); setCouponError(''); }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700 }}>{s.name}</div>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>{s.durationMin + (s.bufferMin || 0)} min</div>
-                    </div>
-                    <strong style={{ fontSize: '1.05rem' }}>{formatMoney(s.price)}</strong>
+                    <input type="radio" name="booking-service" checked={checked} onChange={() => chooseService(s.id)} />
+                    <span className="service-option-main">
+                      <span className="service-option-name">{s.name}</span>
+                      <span className="service-option-meta">
+                        {t('site.services.duration', { min: s.durationMin })}
+                        {s.depositPercent > 0 && s.depositPercent < 100 ? ` · ${t('site.services.deposit', { pct: s.depositPercent })}` : ''}
+                      </span>
+                    </span>
+                    <ModeBadge mode={s.mode} />
+                    <strong className="service-option-price">{formatMoney(s.price)}</strong>
                   </label>
                 );
               })}
-            </div>
+            </fieldset>
           </section>
 
-          {showStaff && (
+          {staffOptions.length > 0 && (
             <section className="card card-pad" aria-labelledby="step-staff">
-              <h2 id="step-staff" className="step-title">2. Team member <span className="step-optional">(optional)</span></h2>
-              <div role="group" aria-labelledby="step-staff" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-                <button type="button" className={`chip ${staffId === '' ? 'active' : ''}`} aria-pressed={staffId === ''}
-                  onClick={() => setStaffId('')}>Anyone</button>
+              <h2 id="step-staff" className="step-title"><span className="step-num" aria-hidden="true">{stepNo('staff')}</span> {t('site.booking.stepStaff')}</h2>
+              <fieldset className="plain-fieldset chip-radios">
+                <legend className="sr-only">{t('site.booking.stepStaff')}</legend>
+                <label className={`chip ${staffId === '' ? 'active' : ''}`}>
+                  <input type="radio" name="booking-staff" className="sr-only" checked={staffId === ''} onChange={() => changeSelection({ staff: null })} />
+                  {t('site.booking.anyStaff')}
+                </label>
                 {staffOptions.map((s) => (
-                  <button key={s.id} type="button" className={`chip ${String(staffId) === String(s.id) ? 'active' : ''}`}
-                    aria-pressed={String(staffId) === String(s.id)} onClick={() => setStaffId(s.id)}>{s.name}</button>
+                  <label key={s.id} className={`chip ${String(staffId) === String(s.id) ? 'active' : ''}`}>
+                    <input type="radio" name="booking-staff" className="sr-only" checked={String(staffId) === String(s.id)}
+                      onChange={() => changeSelection({ staff: s.id })} />
+                    {s.name}{s.designation ? <span className="chip-sub"> · {s.designation}</span> : null}
+                  </label>
                 ))}
-              </div>
+              </fieldset>
+            </section>
+          )}
+
+          {svc.mode === 'BOTH' && (
+            <section className="card card-pad" aria-labelledby="step-mode">
+              <h2 id="step-mode" className="step-title"><span className="step-num" aria-hidden="true">{stepNo('mode')}</span> {t('site.booking.stepMode')}</h2>
+              <fieldset className="plain-fieldset chip-radios">
+                <legend className="sr-only">{t('site.booking.stepMode')}</legend>
+                {MODES.map((m) => (
+                  <label key={m} className={`chip ${mode === m ? 'active' : ''}`}>
+                    <input type="radio" name="booking-mode" className="sr-only" checked={mode === m}
+                      onChange={() => { setQuery({ mode: m }); if (m === 'ONLINE') setMethodChoice('RAZORPAY'); }} />
+                    {t(`site.mode.${m}`)}
+                  </label>
+                ))}
+              </fieldset>
+              <p className="hint mt-1">{mode === 'ONLINE' ? t('site.booking.onlineHint') : t('site.booking.inPersonHint')}</p>
             </section>
           )}
 
           <section className="card card-pad" aria-labelledby="step-when">
-            <h2 id="step-when" className="step-title">{whenStep}. Pick a date &amp; time</h2>
-
-            <div className="date-tabs" role="group" aria-label="Next 7 days">
-              {days.map((d) => (
-                <button key={d.iso} type="button" className={`date-tab ${date === d.iso ? 'active' : ''}`}
-                  aria-pressed={date === d.iso} disabled={isDateDisabled(d.iso)}
-                  aria-label={parseISODate(d.iso).toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
-                  onClick={() => setDate(d.iso)}>
-                  <span className="dow">{d.isToday ? 'Today' : d.dow}</span>
-                  <span className="day-num">{d.day}</span>
-                  <span className="dow">{d.month}</span>
-                </button>
-              ))}
-            </div>
-
-            <button type="button" className="btn btn-ghost btn-sm mt-2" aria-expanded={showCalendar} aria-controls="booking-calendar"
-              onClick={() => setShowCalendar((v) => !v)}>
-              {showCalendar ? 'Hide calendar' : 'Show calendar for more dates'}
-            </button>
-
-            <div className={`picker-grid mt-2 ${showCalendar ? 'with-calendar' : ''}`}>
-              <div id="booking-calendar" hidden={!showCalendar}>
-                {showCalendar && (
-                  <Calendar value={date} onChange={setDate} minDate={today} maxDate={maxDate}
-                    isDisabled={isDateDisabled} label="Appointment date" />
-                )}
+            <h2 id="step-when" className="step-title"><span className="step-num" aria-hidden="true">{stepNo('when')}</span> {t('site.booking.stepWhen')}</h2>
+            {bundle && Array.isArray(bundle.availability) && bundle.availability.length === 0 && (
+              <p className="form-note">{t('site.booking.noHours')}</p>
+            )}
+            <div className="picker-grid with-calendar">
+              <div>
+                <Calendar value={date || ''} onChange={(iso) => changeSelection({ date: iso })} minDate={today} maxDate={maxDate}
+                  isDisabled={isClosed} label={t('site.booking.dateLabel')} />
+                <p className="hint mt-1">{t('site.booking.window', { days: svc.maxAdvanceBookingDays || provider.policy?.maxAdvanceBookingDays || 30 })}</p>
               </div>
-
               <div className="slot-panel">
                 <div className="slot-panel-head">
-                  <h3>{dateLabel}</h3>
-                  <button type="button" className="btn btn-outline btn-xs" onClick={loadSlots} disabled={!date || !svc}>
-                    Refresh slots
-                  </button>
+                  <h3 ref={slotsHeading} tabIndex={-1}>{date ? formatDay(date, locale, { weekday: 'long' }) : t('site.booking.noDates')}</h3>
+                  {date && (
+                    <button type="button" className="btn btn-outline btn-xs" onClick={loadSlots}>{t('site.slots.refresh')}</button>
+                  )}
                 </div>
-                {tz && <p className="tz-note">Times shown in {timeZoneLabel(tz)} ({tz})</p>}
-                <p className="sr-only" role="status">{slotStatus}</p>
-
-                {slots === null ? (
-                  <p className="muted-line"><InlineLoader /> Loading available times…</p>
-                ) : slotsError ? (
-                  <div className="form-error">
-                    {slotsError}{' '}
-                    <button type="button" className="btn btn-outline btn-xs" onClick={loadSlots}>Try again</button>
-                  </div>
-                ) : available.length === 0 ? (
-                  <p className="muted-line">{closedMessage || 'No available slots for this day. Try another date.'}</p>
-                ) : (
-                  <div className="slot-grid" role="group" aria-label="Available times">
-                    {available.map((s) => {
-                      const selected = slotKey(slot) === slotKey(s);
-                      return (
-                        <button key={slotKey(s)} type="button" className={`slot-btn ${selected ? 'selected' : ''}`}
-                          aria-pressed={selected} aria-label={`${formatTime(s.startTime)} to ${formatTime(s.endTime)}`}
-                          onClick={() => setSlot(s)}>
-                          <span className="slot-start">{formatTime(s.startTime)}</span>
-                          <span className="slot-end">{formatTime(s.endTime)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                {tz && <p className="tz-note">{t('site.slots.shownIn', { zone, tz })}</p>}
+                {slotNotice && (
+                  <p className={slotNotice.type === 'error' ? 'form-error' : 'form-note'} role={slotNotice.type === 'error' ? 'alert' : 'status'}>
+                    {slotNotice.text}
+                  </p>
                 )}
+                {!date ? (
+                  <p className="muted-line">{t('site.booking.noDatesText')}</p>
+                ) : (
+                  <SlotPicker slots={slotsReady ? slotsState.slots : null} timezone={tz} message={slotsState.message}
+                    error={slotsReady ? slotsState.error : ''} onRetry={loadSlots}
+                    selectedTime={hold && hold.key === slotKey ? hold.startTime : null} pendingTime={holding}
+                    onSelect={selectSlot} disabled={Boolean(user && !isCustomer)}
+                    groupLabel={t('site.slots.groupFor', { date: formatDay(date, locale) })} />
+                )}
+                {!user && <p className="hint mt-2">{t('site.booking.guestHint')}</p>}
               </div>
             </div>
+          </section>
+
+          <section className="card card-pad" aria-labelledby="step-details">
+            <h2 id="step-details" className="step-title"><span className="step-num" aria-hidden="true">{stepNo('details')}</span> {t('site.booking.stepDetails')}</h2>
+            <div className="field">
+              <label htmlFor="booking-notes">{t('site.booking.notes')} <span className="optional">({t('common.optional')})</span></label>
+              <textarea id="booking-notes" rows={3} maxLength={NOTES_MAX} value={notes} onChange={(e) => setNotes(e.target.value)}
+                placeholder={t('site.booking.notesPlaceholder')} aria-describedby="booking-notes-count" />
+              <span className="hint" id="booking-notes-count">{tp(t, 'site.common.charsLeft', { count: NOTES_MAX - notes.length })}</span>
+            </div>
+
+            <div className="field">
+              <label htmlFor="coupon-code">{t('site.booking.coupon')}</label>
+              <div className="inline-field">
+                <input id="coupon-code" value={couponCode} onChange={(e) => onCouponChange(e.target.value)} placeholder={t('site.booking.couponPlaceholder')}
+                  autoComplete="off" maxLength={40} aria-describedby="coupon-status" aria-invalid={Boolean(couponError) || undefined}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyCoupon(); } }} />
+                <button type="button" className="btn btn-outline" onClick={applyCoupon} disabled={!couponCode.trim() || couponBusy}>
+                  {couponBusy ? <InlineLoader label={t('site.booking.couponChecking')} /> : t('site.booking.couponApply')}
+                </button>
+              </div>
+              <div id="coupon-status" aria-live="polite">
+                {couponError && <span className="hint error-text">{couponError}</span>}
+                {coupon && <span className="hint success-text">{t('site.booking.couponApplied', { code: coupon.code, amount: formatMoney(discount) })}</span>}
+              </div>
+            </div>
+
+            <fieldset className="plain-fieldset field">
+              <legend className="field-label">{t('site.booking.paymentMethod')}</legend>
+              <label className={`pay-option ${method === 'RAZORPAY' ? 'selected' : ''}`}>
+                <input type="radio" name="booking-method" value="RAZORPAY" checked={method === 'RAZORPAY'}
+                  disabled={!onlineAvailable} onChange={() => setMethodChoice('RAZORPAY')} />
+                <span>
+                  <span className="pay-option-title">{t('site.booking.payOnline')}</span>
+                  <span className="pay-option-sub">{config?.paymentsDemoMode ? t('site.booking.payOnlineDemo') : t('site.booking.payOnlineSub')}</span>
+                </span>
+              </label>
+              <label className={`pay-option ${method === 'PAY_AT_VENUE' ? 'selected' : ''}`}>
+                <input type="radio" name="booking-method" value="PAY_AT_VENUE" checked={method === 'PAY_AT_VENUE'}
+                  disabled={mode === 'ONLINE'} onChange={() => setMethodChoice('PAY_AT_VENUE')}
+                  aria-describedby={mode === 'ONLINE' ? 'venue-note' : undefined} />
+                <span>
+                  <span className="pay-option-title">{t('site.booking.payVenue')}</span>
+                  <span className="pay-option-sub" id="venue-note">
+                    {mode === 'ONLINE' ? t('site.booking.venueNotForOnline') : t('site.booking.payVenueSub')}
+                  </span>
+                </span>
+              </label>
+              {cannotPay && <p className="form-error mt-1" role="alert">{t('site.booking.onlineUnavailable')}</p>}
+            </fieldset>
+
+            {depositAllowed && (
+              <fieldset className="plain-fieldset field">
+                <legend className="field-label">{t('site.booking.paymentOption')}</legend>
+                <label className={`pay-option ${option === 'FULL' ? 'selected' : ''}`}>
+                  <input type="radio" name="booking-option" value="FULL" checked={option === 'FULL'} onChange={() => setOptionChoice('FULL')} />
+                  <span>
+                    <span className="pay-option-title">{t('site.booking.payFull')}</span>
+                    <span className="pay-option-sub">{formatMoney(amounts.total)}</span>
+                  </span>
+                </label>
+                <label className={`pay-option ${option === 'DEPOSIT' ? 'selected' : ''}`}>
+                  <input type="radio" name="booking-option" value="DEPOSIT" checked={option === 'DEPOSIT'} onChange={() => setOptionChoice('DEPOSIT')} />
+                  <span>
+                    <span className="pay-option-title">{t('site.booking.payDeposit', { pct: depositPercent })}</span>
+                    <span className="pay-option-sub">
+                      {t('site.booking.depositSplit', {
+                        now: formatMoney(priceSummary({ price: Number(svc.price), discount, method, option: 'DEPOSIT', depositPercent }).payNow),
+                        later: formatMoney(priceSummary({ price: Number(svc.price), discount, method, option: 'DEPOSIT', depositPercent }).atVenue)
+                      })}
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+            )}
           </section>
         </div>
 
         <aside className="booking-summary" aria-labelledby="summary-title">
           <div className="card card-pad">
-            <h2 id="summary-title" className="step-title">Booking summary</h2>
-            {!svc ? (
-              <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Select a service to continue</p>
-            ) : (
-              <>
-                <div className="kv" style={{ gridTemplateColumns: '1fr auto', marginBottom: 6 }}>
-                  <span style={{ color: 'var(--muted)' }}>{svc.name}</span>
-                  <strong>{formatMoney(svc.price)}</strong>
-                </div>
-                {slot && (
-                  <div className="kv" style={{ gridTemplateColumns: '1fr auto', marginBottom: 6, fontSize: '0.9rem' }}>
-                    <span style={{ color: 'var(--muted)' }}>{formatTime(slot.startTime)}{tz ? ` ${timeZoneLabel(tz)}` : ''}</span>
-                    <span>{parseISODate(date)?.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
-                  </div>
-                )}
+            <h2 id="summary-title" className="step-title">{t('site.booking.summary')}</h2>
+            <dl className="summary-list">
+              <div><dt>{t('site.booking.service')}</dt><dd>{svc.name}</dd></div>
+              {staffOptions.length > 0 && (
+                <div><dt>{t('site.booking.staff')}</dt><dd>{selectedStaff ? selectedStaff.name : t('site.booking.anyStaff')}</dd></div>
+              )}
+              <div><dt>{t('site.booking.format')}</dt><dd><ModeBadge mode={mode} /></dd></div>
+              <div><dt>{t('site.booking.duration')}</dt><dd>{t('site.services.duration', { min: svc.durationMin })}</dd></div>
+              <div>
+                <dt>{t('site.booking.when')}</dt>
+                <dd>
+                  {hold ? (
+                    <>
+                      {formatDay(hold.date || date, locale)}, {formatClock(hold.startTime, locale)}
+                      {hold.endTime ? ` – ${formatClock(hold.endTime, locale)}` : ''}{zone ? ` ${zone}` : ''}
+                      {localHeld && <span className="tz-note block">{t('site.slots.yourTime', { time: localHeld })}</span>}
+                    </>
+                  ) : <span className="muted">{t('site.booking.pickTime')}</span>}
+                </dd>
+              </div>
+            </dl>
 
-                <div className="divider-h" />
-
-                <div className="field">
-                  <label htmlFor="coupon-code">Coupon code</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input id="coupon-code" value={coupon} onChange={(e) => onCouponChange(e.target.value)} placeholder="e.g. FIRST50"
-                      autoComplete="off" aria-describedby="coupon-status" aria-invalid={Boolean(couponError) || undefined}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyCoupon(); } }} />
-                    <button type="button" className="btn btn-outline" onClick={applyCoupon} disabled={!coupon.trim() || couponBusy}>
-                      {couponBusy ? <InlineLoader /> : 'Apply'}
-                    </button>
-                  </div>
-                  <div id="coupon-status" aria-live="polite">
-                    {couponError && <span className="hint error-text">{couponError}</span>}
-                    {couponInfo?.valid && <span className="hint success-text">You save {formatMoney(couponInfo.discount)}</span>}
-                  </div>
-                </div>
-
-                <div className="field">
-                  <label htmlFor="payment-method">Payment method</label>
-                  <select id="payment-method" value={method} onChange={(e) => setMethod(e.target.value)}>
-                    <option value="PAY_AT_VENUE">Pay at venue</option>
-                    <option value="RAZORPAY">Pay online (demo)</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label htmlFor="booking-notes">Notes <span style={{ color: 'var(--muted)' }}>(optional)</span></label>
-                  <textarea id="booking-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything we should know?" />
-                </div>
-
-                <div className="kv mt-2">
-                  <span className="k">Subtotal</span><strong>{formatMoney(svc.price)}</strong>
-                  <span className="k">Discount</span><span className="success-text" style={{ fontWeight: 700 }}>{discount ? '-' + formatMoney(discount) : '–'}</span>
-                </div>
-                <div className="divider-h" />
-                <div className="kv" style={{ alignItems: 'baseline' }}>
-                  <span className="k" style={{ fontWeight: 800 }}>Total</span>
-                  <strong style={{ fontSize: '1.5rem' }}>{formatMoney(finalAmount)}</strong>
-                </div>
-
-                <button type="button" className="btn btn-primary btn-block btn-lg mt-3" disabled={!slot || busy}
-                  onClick={createBooking} aria-describedby={!slot ? 'book-hint' : undefined}>
-                  {busy ? <InlineLoader /> : method === 'RAZORPAY' ? 'Proceed to payment' : 'Confirm booking'}
-                </button>
-                {!slot && <p id="book-hint" className="hint mt-1" style={{ textAlign: 'center' }}>Pick a time to continue</p>}
-              </>
+            {hold?.deadline && (
+              <p className="hold-banner">
+                {t('site.booking.heldFor')}{' '}
+                <Countdown deadline={hold.deadline} onExpire={onHoldExpired}
+                  announce={(m) => tp(t, 'site.booking.holdMinutes', { count: m })} expiredText={t('site.booking.holdExpired')} />
+              </p>
             )}
+
+            <div className="divider-h" />
+            <dl className="price-list">
+              <div><dt>{t('site.booking.price')}</dt><dd>{formatMoney(svc.price)}</dd></div>
+              {discount > 0 && <div><dt>{t('site.booking.discount', { code: coupon.code })}</dt><dd className="success-text">−{formatMoney(discount)}</dd></div>}
+              <div className="price-total"><dt>{t('site.booking.total')}</dt><dd>{formatMoney(amounts.total)}</dd></div>
+              {method === 'RAZORPAY' && amounts.total > 0 && (
+                <div><dt>{t('site.booking.payNowLabel')}</dt><dd>{formatMoney(amounts.payNow)}</dd></div>
+              )}
+              {amounts.atVenue > 0 && (
+                <div><dt>{t('site.booking.atVenueLabel')}</dt><dd>{formatMoney(amounts.atVenue)}</dd></div>
+              )}
+            </dl>
+
+            {isCustomer && !verified && !needsVerify && (
+              <p className="form-note mt-2">
+                {t('site.booking.verifyFirst')}{' '}
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => setNeedsVerify(true)}>{t('site.booking.verifyNow')}</button>
+              </p>
+            )}
+            {needsVerify && (
+              <div className="mt-2">
+                <VerifyCode channel="EMAIL" destination={user?.email} autoSend={!verified} headingLevel={3}
+                  onVerified={(u) => {
+                    updateUser(u);
+                    setNeedsVerify(false);
+                    toast(t('site.verify.done'), 'success');
+                    if (holdRef.current) confirmRef.current();
+                  }}
+                  onCancel={() => setNeedsVerify(false)} />
+              </div>
+            )}
+
+            {bookError && <div className="form-error mt-2" role="alert">{bookError}</div>}
+
+            <button type="button" className="btn btn-primary btn-block btn-lg mt-3"
+              disabled={!hold || busy || payment.busy || cannotPay || (user && !isCustomer)}
+              onClick={confirm} aria-describedby={!hold ? 'book-hint' : undefined}>
+              {busy || payment.busy ? <><InlineLoader label={t('site.booking.booking')} /> {t('site.booking.booking')}</> : confirmLabel}
+            </button>
+            {!hold && <p id="book-hint" className="hint mt-1 center">{t('site.booking.pickTimeHint')}</p>}
+            <p className="hint mt-2">{t('site.booking.policyHint', { hours: provider.policy?.cancellationCutoffHours ?? 24 })}</p>
           </div>
         </aside>
       </div>
 
-      {payModal && (
-        <Modal title="Demo payment" onClose={leavePayment} closeDisabled={busy} closeOnBackdrop={false}>
-          <div className="demo-accounts">
-            <strong>Test checkout (Razorpay simulation)</strong>
-            <p className="mt-1">This platform runs in demo payment mode. No real money moves.</p>
-          </div>
-          <div className="kv mt-3">
-            <span className="k">Booking</span><span>{payModal.appointment.bookingRef}</span>
-            <span className="k">Order ID</span><span>{payModal.order.orderId}</span>
-            <span className="k">Amount</span><strong style={{ fontSize: '1.2rem' }}>{formatMoney(payModal.order.amount)}</strong>
-          </div>
-          <button type="button" className="btn btn-success btn-block btn-lg mt-3" disabled={busy} onClick={confirmPay}>
-            {busy ? <InlineLoader /> : <><span aria-hidden="true">{'\u{1F4B3}'}</span> Pay now (simulate)</>}
-          </button>
-          <button type="button" className="btn btn-ghost btn-block mt-2" onClick={cancelPay} disabled={busy}>Cancel payment</button>
-          <p className="hint mt-2" style={{ textAlign: 'center' }}>Closing this window keeps your booking reserved so you can pay later.</p>
-        </Modal>
-      )}
+      {payment.dialog}
     </div>
   );
 }

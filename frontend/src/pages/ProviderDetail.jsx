@@ -1,212 +1,375 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import api from '../api/client';
-import Loader from '../components/Loader';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import api, { getErrorMessage } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/Toast';
+import Loader, { InlineLoader } from '../components/Loader';
+import Modal from '../components/Modal';
 import StarRating from '../components/StarRating';
-import StatusBadge from '../components/StatusBadge';
-import { formatMoney, formatDateTime, initials, isValidTimeZone, timeZoneLabel } from '../utils/format';
+import ModeBadge from '../components/ModeBadge';
+import { useI18n } from '../i18n';
+import { formatMoney, initials, isValidTimeZone, timeZoneLabel } from '../utils/format';
+import { formatClock, formatDay, todayInZone } from '../utils/bookingCalendar';
+import { tp } from '../utils/plural';
 
 const isActive = (x) => x && x.active !== false;
+const WEEK = [1, 2, 3, 4, 5, 6, 7];
+// 1 Jan 2024 was a Monday: day n of the ISO week is 31 Dec 2023 + n.
+const weekdayName = (dow, locale) => new Date(2023, 11, 31 + dow).toLocaleDateString(locale, { weekday: 'long' });
+
+function Hours({ bundle, tz, t, locale }) {
+  const windows = (bundle?.availability || []).filter((a) => isActive(a) && a.staffId == null);
+  const byDay = WEEK.map((d) => ({
+    dow: d,
+    windows: windows.filter((w) => Number(w.dayOfWeek) === d).sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)))
+  }));
+  const today = todayInZone(tz);
+  const changes = (bundle?.blockedDates || [])
+    .filter((b) => b.staffId == null && String(b.date) >= today)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .slice(0, 6);
+
+  if (!bundle) return <p className="muted-line">{t('site.provider.hoursUnavailable')}</p>;
+  if (windows.length === 0 && changes.length === 0) return <p className="muted-line">{t('site.provider.noHours')}</p>;
+
+  return (
+    <>
+      <table className="hours-table">
+        <caption className="sr-only">{t('site.provider.hoursTitle')}</caption>
+        <tbody>
+          {byDay.map(({ dow, windows: ws }) => (
+            <tr key={dow}>
+              <th scope="row">{weekdayName(dow, locale)}</th>
+              <td>
+                {ws.length === 0 ? <span className="closed-text">{t('site.provider.closed')}</span>
+                  : ws.map((w) => `${formatClock(w.startTime, locale)} – ${formatClock(w.endTime, locale)}`).join(', ')}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {changes.length > 0 && (
+        <div className="mt-2">
+          <h3 className="side-subtitle">{t('site.provider.specialDates')}</h3>
+          <ul className="plain-list special-dates">
+            {changes.map((b) => (
+              <li key={b.id ?? `${b.date}-${b.startTime}`}>
+                <span className="special-date">{formatDay(String(b.date), locale)}</span>{' '}
+                {!b.available && !b.startTime && t('site.provider.closedAllDay')}
+                {!b.available && b.startTime && t('site.provider.closedBetween', { from: formatClock(b.startTime, locale), to: formatClock(b.endTime, locale) })}
+                {b.available && b.startTime && t('site.provider.specialHours', { from: formatClock(b.startTime, locale), to: formatClock(b.endTime, locale) })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+}
+
+function Policy({ policy, t }) {
+  if (!policy) return null;
+  const notice = Number(policy.minNoticeMin || 0);
+  const noticeText = notice >= 60 && notice % 60 === 0
+    ? tp(t, 'site.provider.policy.noticeHours', { count: notice / 60 }) : tp(t, 'site.provider.policy.noticeMinutes', { count: notice });
+  return (
+    <>
+      {policy.cancellationPolicy && <p className="policy-text">{policy.cancellationPolicy}</p>}
+      <ul className="policy-list">
+        <li>{t('site.provider.policy.freeCancel', { hours: policy.cancellationCutoffHours })}</li>
+        <li>{t('site.provider.policy.lateRefund', { pct: policy.lateCancelRefundPercent })}</li>
+        <li>{policy.maxReschedules > 0
+          ? tp(t, 'site.provider.policy.reschedule', { count: policy.maxReschedules, hours: policy.rescheduleCutoffHours })
+          : t('site.provider.policy.noReschedule')}</li>
+        <li>{t('site.provider.policy.advance', { days: policy.maxAdvanceBookingDays })}</li>
+        {notice > 0 && <li>{noticeText}</li>}
+        <li>{policy.autoConfirm ? t('site.provider.policy.autoConfirm') : t('site.provider.policy.manualConfirm')}</li>
+      </ul>
+    </>
+  );
+}
 
 export default function ProviderDetail() {
   const { id } = useParams();
-  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { t, locale } = useI18n();
+  const toast = useToast();
   const [provider, setProvider] = useState(null);
-  const [notFound, setNotFound] = useState(false);
-  const [reviews, setReviews] = useState([]);
-  const [avail, setAvail] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [reviews, setReviews] = useState(null);
+  const [bundle, setBundle] = useState(undefined);
+  const [attempt, setAttempt] = useState(0);
+  const [reporting, setReporting] = useState(null);
+  const [reason, setReason] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reported, setReported] = useState(() => new Set());
 
   useEffect(() => {
+    let active = true;
     setProvider(null);
-    setNotFound(false);
-    api.get(`/providers/${id}`).then((r) => setProvider(r.data)).catch(() => setNotFound(true));
-    api.get(`/providers/${id}/reviews`).then((r) => setReviews(r.data || [])).catch(() => {});
-    api.get(`/providers/${id}/availability`).then((r) => setAvail(r.data)).catch(() => {});
-  }, [id]);
+    setLoadError(null);
+    api.get(`/providers/${id}`)
+      .then((r) => { if (active) setProvider(r.data); })
+      .catch((e) => { if (active) setLoadError({ status: e?.response?.status, message: getErrorMessage(e) }); });
+    api.get(`/providers/${id}/reviews`)
+      .then((r) => { if (active) setReviews(Array.isArray(r.data) ? r.data : []); })
+      .catch(() => { if (active) setReviews([]); });
+    api.get(`/providers/${id}/availability`)
+      .then((r) => { if (active) setBundle(r.data); })
+      .catch(() => { if (active) setBundle(null); });
+    return () => { active = false; };
+  }, [id, attempt]);
 
-  if (notFound) {
+  const services = useMemo(() => (provider?.services || []).filter(isActive), [provider]);
+  const staff = useMemo(() => (provider?.staff || []).filter(isActive), [provider]);
+
+  const submitReport = async (e) => {
+    e.preventDefault();
+    if (!reporting) return;
+    setReportBusy(true);
+    try {
+      const { data } = await api.post(`/reviews/${reporting.id}/flag`, { reason: reason.trim() || null });
+      setReported((prev) => new Set(prev).add(reporting.id));
+      toast(data?.message || t('site.reviews.reported'), 'success');
+      setReporting(null);
+      setReason('');
+    } catch (err) {
+      toast(getErrorMessage(err, t('site.reviews.reportFailed')), 'error');
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
+  if (loadError) {
+    const missing = loadError.status === 404;
     return (
       <div className="container page">
         <div className="empty card card-pad">
-          <h1 style={{ fontSize: '1.3rem' }}>Provider not found</h1>
-          <p className="mt-1">This listing may have been removed.</p>
-          <Link className="btn btn-primary mt-3" to="/providers">Browse providers</Link>
+          <h1 className="empty-title">{missing ? t('site.provider.notFound') : t('site.provider.loadFailed')}</h1>
+          <p className="mt-1">{missing ? t('site.provider.notFoundText') : loadError.message}</p>
+          <div className="btn-row center-row mt-3">
+            {!missing && <button type="button" className="btn btn-primary" onClick={() => setAttempt((n) => n + 1)}>{t('common.retry')}</button>}
+            <Link className="btn btn-outline" to="/providers">{t('site.nav.providers')}</Link>
+          </div>
         </div>
       </div>
     );
   }
-  if (!provider) return <Loader />;
+  if (!provider) return <Loader label={t('common.loading')} />;
 
-  // Inactive services/staff can't be booked, so they're not listed.
-  const services = (provider.services || []).filter(isActive);
-  const staff = (provider.staff || []).filter(isActive);
-  const branches = provider.branches || [];
   const tz = isValidTimeZone(provider.timezone) ? provider.timezone : null;
+  const branches = provider.branches || [];
+  const address = [provider.address, provider.city, provider.state, provider.country].filter(Boolean).join(', ');
+  const rating = Number(provider.rating || 0);
 
   return (
     <div className="container page">
-      <Link to="/providers" className="link-more" style={{ fontSize: '0.9rem' }}>&larr; Back to providers</Link>
+      <Link to="/providers" className="link-more back-link"><span aria-hidden="true">&larr;</span> {t('site.provider.back')}</Link>
 
-      <div className="card mt-2" style={{ position: 'relative' }}>
-        <div className="provider-cover" style={{ height: 180, background: 'linear-gradient(135deg, #eef2ff, #f5f3ff)' }}>
-          {provider.coverUrl && <img src={provider.coverUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+      <header className="card mt-2 provider-hero">
+        <div className="provider-cover provider-cover-lg">
+          {provider.coverUrl && <img src={provider.coverUrl} alt="" />}
         </div>
-        <div className="card-pad" style={{ paddingTop: 0 }}>
-          <div className="provider-logo-wrap" style={{ padding: 0, marginTop: -38 }}>
-            <div className="provider-logo" style={{ width: 84, height: 84, fontSize: '2rem' }}>
-              {provider.logoUrl ? <img src={provider.logoUrl} alt="" style={{ width: 76, height: 76, borderRadius: 14 }} /> : (provider.category?.icon || '\u2726')}
-            </div>
+        <div className="card-pad provider-hero-body">
+          <div className="provider-logo provider-logo-lg">
+            {provider.logoUrl
+              ? <img src={provider.logoUrl} alt={t('site.provider.logoAlt', { name: provider.businessName })} />
+              : <span aria-hidden="true">{provider.category?.icon || '✦'}</span>}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <div style={{ marginTop: 12 }}>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <h1 style={{ fontSize: '1.8rem', fontWeight: 800 }}>{provider.businessName}</h1>
-                <StatusBadge status={provider.status} />
+          <div className="provider-hero-row">
+            <div className="provider-hero-text">
+              <h1 className="provider-name">{provider.businessName}</h1>
+              {(provider.specialty || provider.category) && (
+                <p className="provider-specialty">
+                  {provider.specialty}
+                  {provider.specialty && provider.category ? ' · ' : ''}
+                  {provider.category?.name}
+                </p>
+              )}
+              <div className="provider-meta">
+                {provider.reviewCount > 0 ? (
+                  <span className="rating-pill">
+                    <span aria-hidden="true">&#9733;</span> {rating.toFixed(1)}<span className="sr-only"> {t('site.rating.outOf5')}</span>
+                  </span>
+                ) : <span className="badge badge-gray">{t('site.rating.new')}</span>}
+                <a href="#reviews">{tp(t, 'site.rating.reviews', { count: provider.reviewCount || 0 })}</a>
+                {address && <span>{address}</span>}
               </div>
-              <div className="mt-1" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span className="rating-pill">&#9733; {provider.rating?.toFixed?.(1) ?? provider.rating}</span>
-                <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>{provider.reviewCount} reviews</span>
-                <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>{provider.city}{provider.city && provider.state ? ', ' : ''}{provider.state}</span>
-                {provider.website && <a href={provider.website} target="_blank" rel="noreferrer">{provider.website}</a>}
+              <div className="provider-meta">
+                {provider.phone && <a href={`tel:${provider.phone}`}>{provider.phone}</a>}
+                {provider.website && (
+                  <a href={/^https?:\/\//i.test(provider.website) ? provider.website : `https://${provider.website}`} target="_blank" rel="noopener noreferrer">
+                    {provider.website}<span className="sr-only"> {t('site.common.opensNewTab')}</span>
+                  </a>
+                )}
               </div>
-              {provider.description && <p className="mt-2" style={{ color: 'var(--ink-2)', maxWidth: 640 }}>{provider.description}</p>}
+              {tz && <p className="tz-note">{t('site.provider.timesIn', { zone: timeZoneLabel(tz), tz })}</p>}
             </div>
             {services.length > 0 && (
-              <Link className="btn btn-primary btn-lg mt-2" to={`/book/${provider.id}/${services[0].id}`}>
-                Book now
-              </Link>
+              <Link className="btn btn-primary btn-lg" to={`/book/${provider.id}/${services[0].id}`}>{t('common.bookNow')}</Link>
             )}
           </div>
         </div>
-      </div>
+      </header>
 
       <div className="detail-grid mt-4">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {services.length > 0 && (
-            <section className="card">
-              <div className="card-pad">
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 16 }}>Services &amp; pricing</h2>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {services.map((s) => (
-                    <div key={s.id} className="list-item">
-                      <div style={{ flex: 1, minWidth: 180 }}>
-                        <div style={{ fontWeight: 700 }}>{s.name}</div>
-                        <div style={{ fontSize: '0.83rem', color: 'var(--muted)' }}>{s.durationMin}-{s.durationMin + s.bufferMin} min</div>
+        <div className="detail-main">
+          <section className="card card-pad" aria-labelledby="pd-services">
+            <h2 id="pd-services" className="section-h">{t('site.provider.services')}</h2>
+            {services.length === 0 ? (
+              <p className="muted-line">{t('site.provider.noServices')}</p>
+            ) : (
+              <ul className="plain-list">
+                {services.map((s) => (
+                  <li key={s.id} className="service-row">
+                    <div className="service-row-main">
+                      <h3 className="service-row-name">{s.name}</h3>
+                      {s.description && <p className="service-row-desc">{s.description}</p>}
+                      <div className="service-row-meta">
+                        <span>{t('site.services.duration', { min: s.durationMin })}</span>
+                        <ModeBadge mode={s.mode} />
+                        {s.depositPercent > 0 && s.depositPercent < 100 && (
+                          <span className="badge badge-amber">{t('site.services.deposit', { pct: s.depositPercent })}</span>
+                        )}
+                        {(s.staffNames || []).length > 0 && <span>{t('site.provider.with', { names: s.staffNames.join(', ') })}</span>}
                       </div>
-                      <div style={{ fontWeight: 800, fontSize: '1.05rem' }}>{formatMoney(s.price)}</div>
-                      <Link className="btn btn-outline btn-sm" to={`/book/${provider.id}/${s.id}`} aria-label={`Book ${s.name}`}>Book</Link>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div className="service-row-side">
+                      <strong className="service-price">{formatMoney(s.price)}</strong>
+                      <Link className="btn btn-outline btn-sm" to={`/book/${provider.id}/${s.id}`}
+                        aria-label={t('site.services.bookAria', { name: s.name, provider: provider.businessName })}>
+                        {t('site.services.book')}
+                      </Link>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {provider.description && (
+            <section className="card card-pad" aria-labelledby="pd-about">
+              <h2 id="pd-about" className="section-h">{t('site.provider.about')}</h2>
+              <p className="about-text">{provider.description}</p>
             </section>
           )}
 
           {staff.length > 0 && (
-            <section className="card">
-              <div className="card-pad">
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 8 }}>Meet the team</h2>
-                <div className="grid grid-3 mt-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px,1fr))' }}>
-                  {staff.map((s) => (
-                    <div key={s.id} className="card card-pad" style={{ textAlign: 'center' }}>
-                      <div className="avatar" style={{ width: 56, height: 56, margin: '0 auto', fontSize: '1.1rem' }}>
-                        {s.photoUrl ? <img src={s.photoUrl} alt="" /> : initials(s.name)}
-                      </div>
-                      <div style={{ fontWeight: 700, marginTop: 10 }}>{s.name}</div>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>{s.designation}</div>
+            <section className="card card-pad" aria-labelledby="pd-team">
+              <h2 id="pd-team" className="section-h">{t('site.provider.team')}</h2>
+              <ul className="team-grid plain-grid">
+                {staff.map((s) => (
+                  <li key={s.id} className="team-card">
+                    <div className="avatar team-avatar" aria-hidden="true">
+                      {s.photoUrl ? <img src={s.photoUrl} alt="" /> : initials(s.name)}
                     </div>
-                  ))}
-                </div>
-              </div>
-            </section>
-          )}
-
-          {branches.length > 0 && (
-            <section className="card">
-              <div className="card-pad">
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 12 }}>Locations</h2>
-                {branches.map((b) => (
-                  <div key={b.id} className="list-item">
-                    <div className="avatar" style={{ width: 40, height: 40 }} aria-hidden="true">{'\u{1F4CD}'}</div>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>{b.name}{b.main ? ' \u2022 Main' : ''}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
-                        {[b.address, b.city, b.state, b.country].filter(Boolean).join(', ')}
-                      </div>
-                    </div>
-                  </div>
+                    <h3 className="team-name">{s.name}</h3>
+                    {s.designation && <p className="team-role">{s.designation}</p>}
+                    {s.bio && <p className="team-bio">{s.bio}</p>}
+                  </li>
                 ))}
-              </div>
+              </ul>
             </section>
           )}
 
-          <section className="card">
-            <div className="card-pad">
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 16 }}>Customer reviews</h2>
-              {reviews.length === 0 ? (
-                <p style={{ color: 'var(--muted)' }}>No reviews yet.</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {reviews.map((r) => (
-                    <div key={r.id} style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 14 }}>
-                      <div className="avatar-row">
-                        <div className="avatar" style={{ width: 38, height: 38 }}>{initials(r.customerName)}</div>
-                        <div>
-                          <div className="nm">{r.customerName}</div>
-                          <StarRating value={r.rating} size="0.8rem" />
-                        </div>
-                        <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: '0.8rem' }}>{formatDateTime(r.createdAt)}</span>
+          {(branches.length > 0 || address) && (
+            <section className="card card-pad" aria-labelledby="pd-locations">
+              <h2 id="pd-locations" className="section-h">{t('site.provider.locations')}</h2>
+              <ul className="plain-list">
+                {branches.length === 0 && address && <li className="location-row">{address}</li>}
+                {branches.map((b) => (
+                  <li key={b.id} className="location-row">
+                    <strong>{b.name}</strong>{b.main && <span className="badge badge-primary">{t('site.provider.mainBranch')}</span>}
+                    <div className="location-address">{[b.address, b.city, b.state, b.country].filter(Boolean).join(', ')}</div>
+                    {b.phone && <a href={`tel:${b.phone}`}>{b.phone}</a>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section className="card card-pad" aria-labelledby="reviews" id="reviews-section">
+            <h2 id="reviews" className="section-h" tabIndex={-1}>{t('site.reviews.title')}</h2>
+            {provider.reviewCount > 0 && (
+              <p className="review-summary">
+                <StarRating value={rating} /> <strong>{rating.toFixed(1)}</strong>
+                <span className="muted"> · {tp(t, 'site.rating.reviews', { count: provider.reviewCount })}</span>
+              </p>
+            )}
+            {reviews === null ? (
+              <p className="muted-line"><InlineLoader label={t('common.loading')} /> {t('common.loading')}</p>
+            ) : reviews.length === 0 ? (
+              <p className="muted-line">{t('site.reviews.none')}</p>
+            ) : (
+              <ul className="plain-list review-list">
+                {reviews.map((r) => (
+                  <li key={r.id} className="review-item">
+                    <div className="avatar-row">
+                      <div className="avatar review-avatar" aria-hidden="true">
+                        {r.customerPhoto ? <img src={r.customerPhoto} alt="" /> : initials(r.customerName)}
                       </div>
-                      {r.comment && <p className="mt-1" style={{ fontSize: '0.93rem' }}>{r.comment}</p>}
-                      {r.reply && (
-                        <div className="mt-2" style={{ background: 'var(--gradient-soft)', borderRadius: 10, padding: '10px 14px', fontSize: '0.9rem' }}>
-                          <strong style={{ color: 'var(--brand-700)' }}>Provider reply:</strong> {r.reply}
-                        </div>
-                      )}
+                      <div>
+                        <div className="nm">{r.customerName}</div>
+                        <StarRating value={r.rating} size="0.85rem" />
+                      </div>
+                      <span className="review-date">{r.createdAt ? formatDay(String(r.createdAt).slice(0, 10), locale) : ''}</span>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    {r.comment && <p className="review-comment">{r.comment}</p>}
+                    {r.reply && (
+                      <div className="review-reply">
+                        <strong>{t('site.reviews.reply', { name: provider.businessName })}</strong> {r.reply}
+                      </div>
+                    )}
+                    {user && user.id !== r.customerId && (
+                      <button type="button" className="btn btn-ghost btn-xs review-report" disabled={reported.has(r.id)}
+                        onClick={() => { setReporting(r); setReason(''); }}
+                        aria-label={reported.has(r.id) ? t('site.reviews.reportedShort') : t('site.reviews.reportAria', { name: r.customerName })}>
+                        {reported.has(r.id) ? t('site.reviews.reportedShort') : t('site.reviews.report')}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         </div>
 
-        <div className="detail-side">
-          <div className="card card-pad">
-            <h3 style={{ fontWeight: 800, marginBottom: 12 }}>Working hours</h3>
-            {tz && <p className="tz-note">Times in {timeZoneLabel(tz)} ({tz})</p>}
-            {avail?.availability?.length ? (
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {avail.availability.map((a) => (
-                  <div key={a.id} className="list-item" style={{ padding: '10px 2px', borderColor: '#f8fafc' }}>
-                    <span style={{ fontWeight: 600, width: 90 }}>{a.dayName}</span>
-                    <span style={{ color: 'var(--ink-2)', fontSize: '0.9rem' }}>
-                      {a.startTime.slice(0, 5)} - {a.endTime.slice(0, 5)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>Hours not published yet.</p>}
-          </div>
+        <aside className="detail-side" aria-label={t('site.provider.sidebar')}>
+          <section className="card card-pad" aria-labelledby="pd-hours">
+            <h2 id="pd-hours" className="side-title">{t('site.provider.hoursTitle')}</h2>
+            {tz && <p className="tz-note">{t('site.provider.timesIn', { zone: timeZoneLabel(tz), tz })}</p>}
+            {bundle === undefined ? <p className="muted-line"><InlineLoader label={t('common.loading')} /></p>
+              : <Hours bundle={bundle} tz={tz} t={t} locale={locale} />}
+          </section>
 
-          <div className="card card-pad">
-            <h3 style={{ fontWeight: 800, marginBottom: 10 }}>Booking info</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.92rem' }}>
-              <div><strong>Advance booking:</strong> up to {provider.maxAdvanceBookingDays} days</div>
-              <div><strong>Cancellation:</strong> {provider.cancellationPolicy || 'Standard policy applies'}</div>
-              <div><strong>Phone:</strong> {provider.phone || 'Not listed'}</div>
-            </div>
-          </div>
+          <section className="card card-pad" aria-labelledby="pd-policy">
+            <h2 id="pd-policy" className="side-title">{t('site.provider.policyTitle')}</h2>
+            <Policy policy={provider.policy} t={t} />
+          </section>
 
           {services.length > 0 ? (
-            <button className="btn btn-primary btn-lg" onClick={() => navigate(`/book/${provider.id}/${services[0].id}`)}>
-              Book an appointment
-            </button>
+            <Link className="btn btn-primary btn-lg btn-block" to={`/book/${provider.id}/${services[0].id}`}>{t('site.provider.bookCta')}</Link>
           ) : (
-            <p className="form-note">Online booking isn't available for this provider yet.</p>
+            <p className="form-note">{t('site.provider.noOnlineBooking')}</p>
           )}
-        </div>
+        </aside>
       </div>
+
+      {reporting && (
+        <Modal title={t('site.reviews.reportTitle')} onClose={() => setReporting(null)} closeDisabled={reportBusy}>
+          <form onSubmit={submitReport}>
+            <p className="hint mb-2">{t('site.reviews.reportText')}</p>
+            <div className="field">
+              <label htmlFor="report-reason">{t('site.reviews.reason')} <span className="optional">({t('common.optional')})</span></label>
+              <textarea id="report-reason" rows={3} maxLength={255} value={reason} onChange={(e) => setReason(e.target.value)} />
+              <span className="hint">{tp(t, 'site.common.charsLeft', { count: 255 - reason.length })}</span>
+            </div>
+            <button type="submit" className="btn btn-danger btn-block" disabled={reportBusy}>
+              {reportBusy ? <InlineLoader label={t('site.reviews.reporting')} /> : t('site.reviews.reportSubmit')}
+            </button>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

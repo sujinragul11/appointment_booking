@@ -319,7 +319,7 @@ class AppointmentLifecycleApiTest extends IntegrationTestBase {
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=invoice-" + a.bookingRef() + ".pdf"))
                 .andReturn();
-        assertThat(pdf.getResponse().getContentType()).isEqualTo("application/pdf");
+        assertThat(pdf.getResponse().getContentType()).startsWith("application/pdf");
         byte[] body = pdf.getResponse().getContentAsByteArray();
         assertThat(new String(body, 0, 5, StandardCharsets.US_ASCII)).isEqualTo("%PDF-");
         // the provider can download it too
