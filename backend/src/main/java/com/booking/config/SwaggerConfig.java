@@ -2,7 +2,6 @@ package com.booking.config;
 
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
@@ -14,19 +13,15 @@ public class SwaggerConfig {
 
     @Bean
     public OpenAPI openAPI() {
-        String schemeName = "bearerAuth";
+        String scheme = "bearerAuth";
         return new OpenAPI()
                 .info(new Info()
-                        .title("Appointment Booking API")
-                        .description("Location-independent appointment booking platform — React + Spring Boot + MySQL + JWT")
-                        .version("1.0.0")
-                        .contact(new Contact().name("Booking Platform")))
-                .addSecurityItem(new SecurityRequirement().addList(schemeName))
-                .components(new Components().addSecuritySchemes(schemeName,
-                        new SecurityScheme()
-                                .name(schemeName)
-                                .type(SecurityScheme.Type.HTTP)
-                                .scheme("bearer")
-                                .bearerFormat("JWT")));
+                        .title("BookEase - Appointment Booking API")
+                        .description("REST API for customers, providers/staff and admins. "
+                                + "Authenticate with POST /api/auth/login and send 'Authorization: Bearer <accessToken>'.")
+                        .version("2.0.0"))
+                .addSecurityItem(new SecurityRequirement().addList(scheme))
+                .components(new Components().addSecuritySchemes(scheme,
+                        new SecurityScheme().name(scheme).type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")));
     }
 }

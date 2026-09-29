@@ -5,103 +5,140 @@ import com.booking.dto.response.StaffResponse;
 import com.booking.entity.DomainService;
 import com.booking.entity.Provider;
 import com.booking.entity.Staff;
+import com.booking.entity.User;
+import com.booking.enums.ProviderStatus;
+import com.booking.enums.UserRole;
 import com.booking.exception.ApiException;
+import com.booking.mapper.DtoMapper;
 import com.booking.repository.DomainServiceRepository;
-import com.booking.repository.ProviderRepository;
 import com.booking.repository.StaffRepository;
+import com.booking.repository.UserRepository;
 import com.booking.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
+/** Staff members of a provider; optionally with their own STAFF login. */
 @Service
 @RequiredArgsConstructor
 public class StaffService {
 
     private final StaffRepository staffRepository;
-    private final ProviderRepository providerRepository;
     private final DomainServiceRepository serviceRepository;
+    private final UserRepository userRepository;
+    private final ProviderService providerService;
+    private final AuthService authService;
+    private final PasswordEncoder passwordEncoder;
+    private final AuditService auditService;
+    private final DtoMapper mapper;
 
     @Transactional(readOnly = true)
-    public List<StaffResponse> listByProvider(Long providerId, boolean includeInactive) {
-        List<Staff> staff = includeInactive
-                ? staffRepository.findByProviderId(providerId)
-                : staffRepository.findByProviderIdAndActiveTrue(providerId);
-        return staff.stream().map(this::toResponse).toList();
+    public List<StaffResponse> publicList(Long providerId) {
+        return staffRepository.findByProviderIdAndActiveTrueOrderByNameAsc(providerId).stream()
+                .filter(s -> s.getProvider().getStatus() == ProviderStatus.VERIFIED)
+                .map(mapper::staff).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<StaffResponse> mine() {
+        return staffRepository.findByProviderIdOrderByNameAsc(providerService.current().getId()).stream()
+                .map(mapper::staff).toList();
     }
 
     @Transactional
     public StaffResponse create(StaffRequest req) {
-        Provider provider = provider();
-        Staff s = Staff.builder()
+        Provider provider = providerService.current();
+        Staff s = staffRepository.save(Staff.builder()
                 .provider(provider)
-                .name(req.name())
+                .name(req.name().trim())
                 .designation(req.designation())
                 .photoUrl(req.photoUrl())
                 .bio(req.bio())
                 .active(req.active() == null || req.active())
-                .build();
-        if (req.serviceIds() != null && !req.serviceIds().isEmpty()) {
-            for (DomainService svc : serviceRepository.findByProviderId(provider.getId())) {
-                if (req.serviceIds().contains(svc.getId())) {
-                    svc.getStaff().add(s);
-                }
-            }
+                .build());
+        syncServices(provider, s, req.serviceIds());
+        if (req.email() != null && !req.email().isBlank()) {
+            linkLogin(s, req.email());
         }
-        s = staffRepository.save(s);
-        syncServiceLinks(provider, s, req.serviceIds());
-        return toResponse(s);
+        auditService.record("STAFF_CREATED", "Staff", s.getId(), s.getName());
+        return mapper.staff(s);
     }
 
     @Transactional
     public StaffResponse update(Long id, StaffRequest req) {
         Staff s = owned(id);
-        s.setName(req.name());
-        if (req.designation() != null) s.setDesignation(req.designation());
-        if (req.photoUrl() != null) s.setPhotoUrl(req.photoUrl());
-        if (req.bio() != null) s.setBio(req.bio());
-        if (req.active() != null) s.setActive(req.active());
-        s = staffRepository.save(s);
-        syncServiceLinks(s.getProvider(), s, req.serviceIds());
-        return toResponse(s);
+        s.setName(req.name().trim());
+        s.setDesignation(req.designation());
+        if (req.photoUrl() != null) s.setPhotoUrl(req.photoUrl().isBlank() ? null : req.photoUrl());
+        s.setBio(req.bio());
+        if (req.active() != null) {
+            s.setActive(req.active());
+            if (s.getUser() != null) s.getUser().setActive(req.active());
+        }
+        if (req.serviceIds() != null) syncServices(s.getProvider(), s, req.serviceIds());
+        if (req.email() != null && !req.email().isBlank() && s.getUser() == null) {
+            linkLogin(s, req.email());
+        }
+        auditService.record("STAFF_UPDATED", "Staff", s.getId(), s.getName());
+        return mapper.staff(s);
     }
 
     @Transactional
-    public void delete(Long id) {
+    public void deactivate(Long id) {
         Staff s = owned(id);
         s.setActive(false);
-        staffRepository.save(s);
+        if (s.getUser() != null) {
+            s.getUser().setActive(false);
+            s.getUser().setTokenVersion(s.getUser().getTokenVersion() + 1);
+        }
+        auditService.record("STAFF_DEACTIVATED", "Staff", s.getId(), s.getName());
     }
 
-    private void syncServiceLinks(Provider provider, Staff s, List<Long> serviceIds) {
-        for (DomainService svc : serviceRepository.findByProviderId(provider.getId())) {
-            if (serviceIds != null && serviceIds.contains(svc.getId())) {
-                if (!svc.getStaff().contains(s)) svc.getStaff().add(s);
+    /** The Staff profile of the signed-in STAFF user. */
+    @Transactional(readOnly = true)
+    public Staff currentStaff() {
+        return staffRepository.findByUserId(SecurityUtils.currentUserId())
+                .filter(Staff::isActive)
+                .orElseThrow(() -> ApiException.forbidden("No active staff profile for this account"));
+    }
+
+    private void linkLogin(Staff s, String rawEmail) {
+        String email = rawEmail.trim().toLowerCase();
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw ApiException.conflict("An account with this e-mail already exists");
+        }
+        User u = userRepository.save(User.builder()
+                .name(s.getName())
+                .email(email)
+                .password(passwordEncoder.encode(UUID.randomUUID().toString()))
+                .role(UserRole.STAFF)
+                .build());
+        s.setUser(u);
+        authService.sendResetLink(u);
+        auditService.record("STAFF_LOGIN_CREATED", "Staff", s.getId(), email);
+    }
+
+    private void syncServices(Provider provider, Staff s, List<Long> serviceIds) {
+        Set<Long> wanted = serviceIds == null ? Set.of() : new HashSet<>(serviceIds);
+        for (DomainService svc : serviceRepository.findByProviderIdOrderByNameAsc(provider.getId())) {
+            if (wanted.contains(svc.getId())) {
+                svc.getStaff().add(s);
+                s.getServices().add(svc);
             } else {
                 svc.getStaff().remove(s);
+                s.getServices().remove(svc);
             }
         }
     }
 
     private Staff owned(Long id) {
-        Staff s = staffRepository.findById(id)
+        return staffRepository.findByIdAndProviderId(id, providerService.current().getId())
                 .orElseThrow(() -> ApiException.notFound("Staff not found"));
-        if (!s.getProvider().getId().equals(provider().getId())) {
-            throw ApiException.forbidden("Not your staff");
-        }
-        return s;
-    }
-
-    private Provider provider() {
-        return providerRepository.findByUserId(SecurityUtils.currentUserId())
-                .orElseThrow(() -> ApiException.notFound("Provider profile not found"));
-    }
-
-    public StaffResponse toResponse(Staff s) {
-        List<Long> serviceIds = s.getServices().stream().map(DomainService::getId).toList();
-        return new StaffResponse(s.getId(), s.getProvider().getId(), s.getName(), s.getDesignation(),
-                s.getPhotoUrl(), s.getBio(), s.isActive(), serviceIds);
     }
 }

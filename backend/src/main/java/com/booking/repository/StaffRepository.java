@@ -8,9 +8,11 @@ import java.util.Optional;
 
 public interface StaffRepository extends JpaRepository<Staff, Long> {
 
-    List<Staff> findByProviderId(Long providerId);
+    List<Staff> findByProviderIdOrderByNameAsc(Long providerId);
 
-    List<Staff> findByProviderIdAndActiveTrue(Long providerId);
+    List<Staff> findByProviderIdAndActiveTrueOrderByNameAsc(Long providerId);
 
     Optional<Staff> findByIdAndProviderId(Long id, Long providerId);
+
+    Optional<Staff> findByUserId(Long userId);
 }

@@ -1,11 +1,15 @@
 package com.booking.dto.request;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
+import com.booking.enums.*;
+import com.booking.validation.StrongPassword;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
+
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
 
 public record ResetPasswordRequest(
-        @NotBlank @Email String email,
-        @NotBlank String otp,
-        @NotBlank @Size(min = 6) String newPassword
+        @NotBlank String token,
+        @NotBlank @StrongPassword String newPassword
 ) {}

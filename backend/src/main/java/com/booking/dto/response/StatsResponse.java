@@ -1,5 +1,8 @@
 package com.booking.dto.response;
 
+import com.booking.enums.*;
+
+import java.time.*;
 import java.util.List;
 
 public record StatsResponse(
@@ -9,7 +12,10 @@ public record StatsResponse(
         long pendingProviders,
         long totalAppointments,
         long pendingAppointments,
+        long confirmedAppointments,
+        long completedAppointments,
+        long cancelledAppointments,
         double totalRevenue,
-        long totalSlots,
-        long totalReviews
+        long totalReviews,
+        long pendingReviews
 ) {}

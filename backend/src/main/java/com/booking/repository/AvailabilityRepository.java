@@ -7,9 +7,11 @@ import java.util.List;
 
 public interface AvailabilityRepository extends JpaRepository<Availability, Long> {
 
-    List<Availability> findByProviderId(Long providerId);
+    List<Availability> findByProviderIdOrderByDayOfWeekAscStartTimeAsc(Long providerId);
 
-    List<Availability> findByProviderIdAndStaffIsNull(Long providerId);
+    List<Availability> findByProviderIdAndStaffIsNullAndDayOfWeekAndActiveTrue(Long providerId, int dayOfWeek);
 
-    List<Availability> findByProviderIdAndStaffId(Long providerId, Long staffId);
+    List<Availability> findByProviderIdAndStaffIdAndDayOfWeekAndActiveTrue(Long providerId, Long staffId, int dayOfWeek);
+
+    boolean existsByProviderIdAndActiveTrueAndDayOfWeek(Long providerId, int dayOfWeek);
 }

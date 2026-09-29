@@ -7,6 +7,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -18,32 +19,29 @@ public class UserPrincipal implements UserDetails {
     private final String name;
     private final String password;
     private final UserRole role;
-    private final boolean verified;
+    private final boolean enabled;
+    private final boolean locked;
 
-    public UserPrincipal(Long id, String email, String name, String password, UserRole role, boolean verified) {
+    public UserPrincipal(Long id, String email, String name, String password, UserRole role,
+                         boolean enabled, boolean locked) {
         this.id = id;
         this.email = email;
         this.name = name;
         this.password = password;
         this.role = role;
-        this.verified = verified;
+        this.enabled = enabled;
+        this.locked = locked;
     }
 
     public static UserPrincipal from(User user) {
-        return new UserPrincipal(user.getId(), user.getEmail(), user.getName(),
-                user.getPassword(), user.getRole(), user.isVerified());
+        boolean locked = user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now());
+        return new UserPrincipal(user.getId(), user.getEmail(), user.getName(), user.getPassword(),
+                user.getRole(), user.canLogin(), locked);
     }
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        String roleName = switch (role) {
-            case PROVIDER -> "PROVIDER";
-            case CUSTOMER -> "CUSTOMER";
-            case STAFF -> "STAFF";
-            case ADMIN -> "ADMIN";
-            default -> "GUEST";
-        };
-        return List.of(new SimpleGrantedAuthority("ROLE_" + roleName));
+        return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
     }
 
     @Override
@@ -52,22 +50,12 @@ public class UserPrincipal implements UserDetails {
     }
 
     @Override
-    public boolean isAccountNonExpired() {
-        return true;
-    }
-
-    @Override
     public boolean isAccountNonLocked() {
-        return true;
-    }
-
-    @Override
-    public boolean isCredentialsNonExpired() {
-        return true;
+        return !locked;
     }
 
     @Override
     public boolean isEnabled() {
-        return true;
+        return enabled;
     }
 }

@@ -1,14 +1,18 @@
 package com.booking.entity;
 
+import com.booking.enums.*;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
-import java.time.LocalDateTime;
+import java.time.*;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "reviews", indexes = {
-        @Index(name = "idx_review_provider", columnList = "provider_id")
+        @Index(name = "idx_review_provider_status", columnList = "provider_id, status")
 })
 @Getter
 @Setter
@@ -39,6 +43,18 @@ public class Review {
     @Column(columnDefinition = "TEXT")
     private String comment;
 
+    /** Written reviews wait for moderation; rating-only reviews are approved immediately (FR-42). */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private ReviewStatus status = ReviewStatus.PENDING;
+
+    @Column(name = "moderation_note", length = 500)
+    private String moderationNote;
+
+    @Column(name = "moderated_at")
+    private LocalDateTime moderatedAt;
+
     @Column(columnDefinition = "TEXT")
     private String reply;
 
@@ -48,6 +64,9 @@ public class Review {
     @Column(name = "is_flagged", nullable = false)
     @Builder.Default
     private boolean flagged = false;
+
+    @Column(name = "flag_reason", length = 255)
+    private String flagReason;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

@@ -1,12 +1,17 @@
 package com.booking.dto.request;
 
-import jakarta.validation.constraints.NotNull;
+import com.booking.enums.*;
+import com.booking.validation.StrongPassword;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 
 public record RescheduleRequest(
         @NotNull LocalDate date,
         @NotNull LocalTime startTime,
-        @NotNull LocalTime endTime
+        LocalTime endTime,
+        @Size(max = 500) String reason
 ) {}

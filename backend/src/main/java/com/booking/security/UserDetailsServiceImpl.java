@@ -1,6 +1,5 @@
 package com.booking.security;
 
-import com.booking.entity.User;
 import com.booking.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -18,8 +17,8 @@ public class UserDetailsServiceImpl implements UserDetailsService {
     @Override
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
-        return UserPrincipal.from(user);
+        return userRepository.findByEmailIgnoreCase(email.trim())
+                .map(UserPrincipal::from)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 }

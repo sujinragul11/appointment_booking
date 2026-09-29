@@ -1,55 +1,143 @@
+# ------------------------------------------------------------------
+# Default (production-style) profile: PostgreSQL. Every secret comes
+# from the environment - there are no usable defaults for them.
+# Profiles: dev (H2 in-memory + demo data), test (used by the test suite)
+# ------------------------------------------------------------------
 server:
-  port: 8080
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
 
 spring:
   application:
     name: booking-backend
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3306/booking_db?createDatabaseIfNotExist=true&serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true}
-    username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:root}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/booking_db}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
   jpa:
     hibernate:
-      ddl-auto: update
-    show-sql: false
+      ddl-auto: validate
+    open-in-view: false
     properties:
       hibernate:
-        format_sql: true
-        dialect: org.hibernate.dialect.MySQLDialect
-    open-in-view: false
+        jdbc.time_zone: UTC
+        default_batch_fetch_size: 50
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: UTC
+    serialization:
+      write-dates-as-timestamps: false
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 3MB
   mail:
-    host: ${MAIL_HOST:smtp.gmail.com}
+    host: ${MAIL_HOST:}
     port: ${MAIL_PORT:587}
     username: ${MAIL_USERNAME:}
     password: ${MAIL_PASSWORD:}
     properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-  jackson:
-    default-property-inclusion: non_null
-    time-zone: UTC
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:true}
+      mail.smtp.starttls.enable: ${MAIL_STARTTLS:true}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  cache:
+    type: simple
+    cache-names: categories
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH:false}
+    mail:
+      enabled: false
 
 app:
-  jwt:
-    secret: ${JWT_SECRET:bXktc3VwZXItc2VjdXJlLXNlY3JldC1rZXktZm9yLWFwcG9pbnRtZW50LWJvb2tpbmctcGxhdGZvcm0tMjAyNi0yNDktYnl0ZXM=}
-    expiration-ms: 3600000
-    refresh-expiration-ms: 604800000
-  cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:3000,http://localhost:4173}
-  razorpay:
-    key-id: ${RAZORPAY_KEY_ID:rzp_test_demo}
-    key-secret: ${RAZORPAY_KEY_SECRET:demo}
+  name: ${APP_NAME:BookEase}
+  # Public URL of the web app, used in e-mail links (password reset, bookings)
   app-url: ${APP_URL:http://localhost:5173}
-
-logging:
-  level:
-    com.booking: INFO
-    org.hibernate.SQL: WARN
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:4173}
+  jwt:
+    # Base64 encoded, at least 256 bits. Required outside the dev/test profiles.
+    secret: ${JWT_SECRET:}
+    allow-ephemeral-secret: false
+    access-expiration-ms: ${JWT_ACCESS_TTL_MS:900000}      # 15 minutes
+    refresh-expiration-ms: ${JWT_REFRESH_TTL_MS:604800000} # 7 days
+  security:
+    max-failed-logins: 5
+    lockout-minutes: 15
+    otp-ttl-minutes: 10
+    otp-max-attempts: 5
+    reset-token-ttl-minutes: 30
+    rate-limit:
+      enabled: ${RATE_LIMIT_ENABLED:true}
+      auth-per-minute: 10
+      booking-per-minute: 20
+      public-per-minute: 120
+  seed:
+    demo-data: ${SEED_DEMO_DATA:false}
+  bootstrap-admin:
+    # Creates the first admin account on an empty database when both are set.
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
+  mail:
+    enabled: ${MAIL_ENABLED:false}
+    from: ${MAIL_FROM:no-reply@bookease.local}
+  sms:
+    # twilio | log
+    provider: ${SMS_PROVIDER:log}
+    twilio:
+      account-sid: ${TWILIO_ACCOUNT_SID:}
+      auth-token: ${TWILIO_AUTH_TOKEN:}
+      from-number: ${TWILIO_FROM_NUMBER:}
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:}
+  payments:
+    currency: INR
+    # Unpaid online bookings release their slot after this many minutes
+    checkout-ttl-minutes: 10
+    # Allows the simulated gateway when Razorpay keys are absent. Never enable in production.
+    demo-mode: ${PAYMENTS_DEMO_MODE:false}
+    razorpay:
+      key-id: ${RAZORPAY_KEY_ID:}
+      key-secret: ${RAZORPAY_KEY_SECRET:}
+      webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+  slot-lock:
+    # db | redis  (checkout hold with a 10 minute TTL)
+    store: ${SLOT_LOCK_STORE:db}
+    ttl-minutes: 10
+  video:
+    # Online appointments get a unique meeting room under this base URL
+    base-url: ${VIDEO_BASE_URL:https://meet.jit.si}
+  uploads:
+    dir: ${UPLOAD_DIR:./uploads}
 
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    com.booking: INFO
