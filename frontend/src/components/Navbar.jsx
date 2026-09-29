@@ -35,6 +35,7 @@ export default function Navbar() {
     { to: '/categories', label: t('nav.categories') }
   ];
   if (user?.role === 'PROVIDER') links.push({ to: '/dashboard/provider', label: t('nav.dashboard') });
+  if (user?.role === 'STAFF') links.push({ to: '/dashboard/staff', label: t('nav.dashboard') });
   if (user?.role === 'ADMIN') links.push({ to: '/dashboard/admin', label: t('nav.admin') });
   if (user?.role === 'CUSTOMER') links.push({ to: '/dashboard', label: t('nav.myBookings'), end: true });
 

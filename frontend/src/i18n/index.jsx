@@ -11,7 +11,25 @@ export const LANGUAGES = [
   { code: 'ta', label: 'தமிழ்', locale: 'ta-IN' }
 ];
 
-const DICTIONARIES = { en, hi, ta };
+// Feature areas add their strings in i18n/areas/<area>.<lang>.js (default export: a nested
+// object, e.g. { admin: { users: { title: 'Users' } } }); they are merged into the base dictionary.
+function deepMerge(target, source) {
+  for (const [k, v] of Object.entries(source || {})) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      target[k] = deepMerge(target[k] && typeof target[k] === 'object' ? target[k] : {}, v);
+    } else {
+      target[k] = v;
+    }
+  }
+  return target;
+}
+
+const DICTIONARIES = { en: deepMerge({}, en), hi: deepMerge({}, hi), ta: deepMerge({}, ta) };
+const AREA_MODULES = import.meta.glob('./areas/*.js', { eager: true });
+for (const [path, mod] of Object.entries(AREA_MODULES)) {
+  const match = path.match(/\/[\w-]+\.(\w+)\.js$/);
+  if (match && DICTIONARIES[match[1]]) deepMerge(DICTIONARIES[match[1]], mod.default);
+}
 export const DEFAULT_LANG = 'en';
 export const LANG_STORAGE_KEY = 'lang';
 

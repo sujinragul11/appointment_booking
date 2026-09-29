@@ -74,7 +74,7 @@ describe('ProtectedRoute', () => {
   });
 
   it('sends unknown roles to "/" instead of /dashboard', () => {
-    signInAs('STAFF');
+    signInAs('GUEST');
     renderAt('/dashboard');
     expect(screen.getByTestId('where')).toHaveTextContent(/^\/$/);
   });

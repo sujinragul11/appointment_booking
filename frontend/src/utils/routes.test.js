@@ -6,7 +6,8 @@ describe('route helpers', () => {
     expect(homePathFor('ADMIN')).toBe('/dashboard/admin');
     expect(homePathFor('PROVIDER')).toBe('/dashboard/provider');
     expect(homePathFor('CUSTOMER')).toBe('/dashboard');
-    expect(homePathFor('STAFF')).toBe('/');
+    expect(homePathFor('STAFF')).toBe('/dashboard/staff');
+    expect(homePathFor('GUEST')).toBe('/');
     expect(homePathFor(undefined)).toBe('/');
   });
 

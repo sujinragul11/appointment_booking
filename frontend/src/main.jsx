@@ -7,6 +7,10 @@ import { I18nProvider } from './i18n';
 import ErrorBoundary from './components/ErrorBoundary';
 import { registerServiceWorker } from './utils/push';
 import './styles/global.css';
+// Area stylesheets (one per feature area, owned by that area)
+import './styles/site.css';
+import './styles/provider.css';
+import './styles/admin.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

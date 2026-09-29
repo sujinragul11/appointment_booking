@@ -2,6 +2,7 @@
 export function homePathFor(role) {
   if (role === 'ADMIN') return '/dashboard/admin';
   if (role === 'PROVIDER') return '/dashboard/provider';
+  if (role === 'STAFF') return '/dashboard/staff';
   if (role === 'CUSTOMER') return '/dashboard';
   return '/';
 }
