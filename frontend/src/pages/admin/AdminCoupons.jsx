@@ -103,7 +103,6 @@ export default function AdminCoupons() {
   };
 
   return (
-<<<<<<< HEAD
     <AdminLayout
       title={t('admin.coupons.title')}
       subtitle={t('admin.coupons.subtitle')}
@@ -131,38 +130,6 @@ export default function AdminCoupons() {
                 const d = discount(c);
                 const state = couponState(c);
                 return (
-=======
-    <div className="dash">
-      <aside className="dash-side">
-        <nav className="dash-nav">
-          <Link to="/dashboard/admin">Overview</Link>
-          <Link to="/dashboard/admin/providers">Providers</Link>
-          <Link to="/dashboard/admin/categories">Categories</Link>
-          <Link to="/dashboard/admin/users">Users</Link>
-          <Link to="/dashboard/admin/coupons" className="active">Coupons</Link>
-        </nav>
-      </aside>
-
-      <div>
-        <div className="section-title">
-          <div>
-            <h1 style={{ fontSize: '1.6rem', fontWeight: 800 }}>Coupons</h1>
-            <p>Discount codes customers can apply</p>
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={() => open(null)}>New coupon</button>
-        </div>
-
-        {!items ? (
-          <p style={{ color: 'var(--muted)' }}>Loading...</p>
-        ) : items.length === 0 ? (
-          <div className="empty card card-pad"><h3>No coupons yet</h3><p className="mt-1">Create promo codes to boost bookings.</p></div>
-        ) : (
-          <div className="card" style={{ overflowX: 'auto' }}>
-            <table className="table">
-              <thead><tr><th>Code</th><th>Discount</th><th>Valid</th><th>Used</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody>
-                {items.map((c) => (
->>>>>>> a52368e (backendcommit)
                   <tr key={c.id}>
                     <th scope="row"><code className="adm-coupon-code">{c.code}</code></th>
                     <td>

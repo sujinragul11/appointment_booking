@@ -53,7 +53,6 @@ export default function AdminProviders() {
   };
 
   return (
-<<<<<<< HEAD
     <AdminLayout title={t('admin.providers.title')} subtitle={t('admin.providers.subtitle')}>
       <Tabs idBase="provider-status" label={t('admin.providers.tabs')} value={status}
         tabs={TABS.map((key) => ({ key, label: t(`admin.providers.tab.${key}`) }))}
@@ -62,19 +61,6 @@ export default function AdminProviders() {
         <SearchBox label={t('admin.providers.search')} placeholder={t('admin.providers.searchPlaceholder')} value={filters.q}
           onCommit={(q) => setFilters({ q })} />
       </div>
-=======
-    <div className="dash">
-      <aside className="dash-side">
-        <nav className="dash-nav">
-          <Link to="/dashboard/admin">Overview</Link>
-          <Link to="/dashboard/admin/providers" className="active">Providers</Link>
-          <Link to="/dashboard/admin/categories">Categories</Link>
-          <Link to="/dashboard/admin/users">Users</Link>
-          <Link to="/dashboard/admin/coupons">Coupons</Link>
-        </nav>
-      </aside>
->>>>>>> a52368e (backendcommit)
-
       <TabPanel idBase="provider-status" value={status} busy={list.loading}>
         <DataState loading={list.loading} error={list.error} hasData={Boolean(page)} onRetry={list.reload}
           empty={Boolean(page) && providers.length === 0}

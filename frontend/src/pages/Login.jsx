@@ -9,7 +9,6 @@ import useSiteConfig from '../hooks/useSiteConfig';
 import { useT } from '../i18n';
 import { homePathFor, nextFromLocation } from '../utils/routes';
 
-<<<<<<< HEAD
 // One-click demo logins; shown only in development / payments demo mode (never with live payments).
 const DEMOS = [
   ['customer', 'customer@booking.com', 'Customer@123'],
@@ -27,8 +26,6 @@ const PROVIDERS = [
   ['Nova Fitness Studio', 'fitness@booking.com', 'Fitness@123']
 ];
 
-=======
->>>>>>> a52368e (backendcommit)
 export default function Login() {
   const { login, updateUser } = useAuth();
   const t = useT();
@@ -124,7 +121,6 @@ export default function Login() {
           {t('auth.newHere')} <Link to={registerLink}>{t('auth.createAccountLink')}</Link>
         </p>
       </div>
-<<<<<<< HEAD
 
       {showDemos && (
         <section className="demo-accounts mt-3" aria-labelledby="demo-title">
@@ -148,8 +144,6 @@ export default function Login() {
           </div>
         </section>
       )}
-=======
->>>>>>> a52368e (backendcommit)
     </div>
   );
 }

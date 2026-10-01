@@ -32,15 +32,9 @@ public class AdminService {
     private final AppointmentRepository appointmentRepository;
     private final PaymentRepository paymentRepository;
     private final ReviewRepository reviewRepository;
-<<<<<<< HEAD
     private final StaffRepository staffRepository;
     private final AuditService auditService;
     private final DtoMapper mapper;
-=======
-    private final SlotRepository slotRepository;
-    private final CategoryRepository categoryRepository;
-    private final DomainServiceRepository serviceRepository;
->>>>>>> a52368e (backendcommit)
 
     @Transactional(readOnly = true)
     public StatsResponse stats() {
@@ -126,29 +120,4 @@ public class AdminService {
         }
         return u;
     }
-<<<<<<< HEAD
 }
-=======
-
-    @Transactional
-    public void deleteCategory(Long id) {
-        if (providerRepository.existsByCategoryId(id) || serviceRepository.existsByCategoryId(id)) {
-            throw ApiException.conflict("Category is in use by providers or services");
-        }
-        categoryRepository.deleteById(id);
-    }
-
-    private ProviderResponse toResponseLite(Provider p) {
-        CategoryResponse cat = p.getCategory() != null
-                ? new CategoryResponse(p.getCategory().getId(), p.getCategory().getName(),
-                        p.getCategory().getIcon(), p.getCategory().getSlug())
-                : null;
-        return new ProviderResponse(
-                p.getId(), p.getBusinessName(), p.getDescription(), p.getLogoUrl(), p.getCoverUrl(),
-                cat, p.getCity(), p.getState(), p.getCountry(), p.getAddress(),
-                p.getLatitude(), p.getLongitude(), p.getPhone(), p.getWebsite(), p.getStatus(),
-                p.getRating(), p.getReviewCount(), p.getMaxAdvanceBookingDays(), p.getCancellationPolicy(),
-                p.getCreatedAt(), null, null, null);
-    }
-}
->>>>>>> a52368e (backendcommit)

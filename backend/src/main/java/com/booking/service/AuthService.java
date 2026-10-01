@@ -76,16 +76,10 @@ public class AuthService {
     }
 
     @Transactional
-<<<<<<< HEAD
     public AuthResponse register(RegisterRequest req) {
         String email = req.email().trim().toLowerCase();
         if (userRepository.existsByEmailIgnoreCase(email)) {
             throw ApiException.conflict("An account with this e-mail already exists");
-=======
-    public AuthResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.email().toLowerCase())) {
-            throw ApiException.conflict("Email already registered");
->>>>>>> a52368e (backendcommit)
         }
         UserRole role = req.role() == null ? UserRole.CUSTOMER : req.role();
         if (role != UserRole.CUSTOMER && role != UserRole.PROVIDER) {
@@ -122,84 +116,12 @@ public class AuthService {
         return tokens(user);
     }
 
-<<<<<<< HEAD
     @Transactional(noRollbackFor = ApiException.class)
     public AuthResponse login(LoginRequest req) {
         User user = userRepository.findByEmailIgnoreCase(req.email().trim()).orElse(null);
         if (user == null || user.isDeleted()) {
             passwordEncoder.matches(req.password(), dummyHash());
             throw ApiException.unauthorized("Invalid email or password");
-=======
-    @Transactional
-    public AuthResponse login(LoginRequest request) {
-        // Emails are stored lowercase and PostgreSQL compares case-sensitively.
-        String email = request.email().toLowerCase();
-        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, request.password()));
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> ApiException.unauthorized("Invalid email or password"));
-        Long providerId = providerRepository.findByUserId(user.getId()).map(Provider::getId).orElse(null);
-        return buildAuthResponse(user, providerId);
-    }
-
-    @Transactional
-    public AuthResponse refresh(RefreshTokenRequest request) {
-        String email = jwtService.extractUsername(request.refreshToken());
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> ApiException.unauthorized("Invalid refresh token"));
-        return buildAuthResponse(user, providerRepository.findByUserId(user.getId()).map(Provider::getId).orElse(null));
-    }
-
-    @Transactional
-    public MessageResponse sendOtpChallenges(SendOtpRequest request) {
-        User user = userRepository.findAll().stream()
-                .filter(u -> request.phone().replaceAll("[^0-9]", "").equals(u.getPhone() == null ? "" : u.getPhone().replaceAll("[^0-9]", "")))
-                .findFirst().orElseThrow(() -> ApiException.notFound("No account found for this phone"));
-        user.setOtp(BookingUtils.generateOtp());
-        user.setOtpExpiry(LocalDateTime.now().plusMinutes(10));
-        userRepository.save(user);
-        log.info("[OTP-DEMO] phone={} otp={} (SMS mock)", request.phone(), user.getOtp());
-        return new MessageResponse("OTP sent to " + request.phone() + " (demo OTP: " + user.getOtp() + ")");
-    }
-
-    @Transactional
-    public MessageResponse verifyOtp(OtpVerifyRequest request) {
-        User user = userRepository.findByEmail(request.email().toLowerCase())
-                .orElseThrow(() -> ApiException.notFound("User not found"));
-        validateOtp(user, request.otp());
-        user.setOtp(null);
-        user.setOtpExpiry(null);
-        user.setEmailVerified(true);
-        userRepository.save(user);
-        return new MessageResponse("Email verified successfully");
-    }
-
-    @Transactional
-    public MessageResponse forgotPassword(ForgotPasswordRequest request) {
-        User user = userRepository.findByEmail(request.email().toLowerCase())
-                .orElseThrow(() -> ApiException.notFound("No account found for this email"));
-        user.setOtp(BookingUtils.generateOtp());
-        user.setOtpExpiry(LocalDateTime.now().plusMinutes(10));
-        userRepository.save(user);
-        log.info("[OTP-DEMO] email={} otp={}", user.getEmail(), user.getOtp());
-        return new MessageResponse("Password reset OTP sent to your email (demo OTP: " + user.getOtp() + ")");
-    }
-
-    @Transactional
-    public MessageResponse resetPassword(ResetPasswordRequest request) {
-        User user = userRepository.findByEmail(request.email().toLowerCase())
-                .orElseThrow(() -> ApiException.notFound("User not found"));
-        validateOtp(user, request.otp());
-        user.setOtp(null);
-        user.setOtpExpiry(null);
-        user.setPassword(passwordEncoder.encode(request.newPassword()));
-        userRepository.save(user);
-        return new MessageResponse("Password reset successfully");
-    }
-
-    private void validateOtp(User user, String otp) {
-        if (user.getOtp() == null || user.getOtpExpiry() == null) {
-            throw ApiException.badRequest("No OTP pending. Request a new one.");
->>>>>>> a52368e (backendcommit)
         }
         if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
             throw new ApiException(HttpStatus.LOCKED, "Too many failed attempts. Try again after "
