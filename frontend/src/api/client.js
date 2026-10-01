@@ -122,7 +122,10 @@ api.interceptors.response.use(
 );
 
 export function getErrorMessage(err, fallback = 'Something went wrong') {
-  return err?.response?.data?.message || err?.response?.data?.error || err?.message || fallback;
+  const data = err?.response?.data;
+  // Validation failures list per-field messages; show those rather than a bare "Validation failed".
+  const fieldErrors = data?.errors && Object.entries(data.errors).map(([field, msg]) => `${field} ${msg}`).join(', ');
+  return fieldErrors || data?.message || data?.error || err?.message || fallback;
 }
 
 export default api;

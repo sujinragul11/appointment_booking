@@ -29,8 +29,12 @@ cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=dev     # API on :8
 cd frontend && npm ci && npm run dev                                  # web app on :5173
 ```
 
+<<<<<<< HEAD
 In the `dev` profile, e-mails and SMS (verification codes, password-reset links, reminders) are printed in the API
 console, and online payments use a simulated gateway.
+=======
+Runs an in-memory H2 database in MySQL compatibility mode (schema auto-created on every boot; starts empty apart from the admin account). H2 console available at `http://localhost:8080/h2-console`.
+>>>>>>> a52368e (backendcommit)
 
 ## Demo accounts (`dev` profile or `SEED_DEMO_DATA=true`)
 
@@ -96,3 +100,61 @@ cd frontend && npm test               # component and unit tests (Vitest)
 cd frontend && npm run e2e            # end-to-end tests (Playwright; needs the dev API on :8080)
 k6 run loadtest/k6-booking.js         # load test
 ```
+<<<<<<< HEAD
+=======
+
+Connection defaults: `jdbc:postgresql://localhost:5432/booking_db`, user `postgres`, password `sujin` — override with `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`. On first boot the schema (16 tables) is created and the admin account is added. The PostgreSQL driver is already in `pom.xml`, so the MySQL-managed-schema SQL in `application.yml` (`createDatabaseIfNotExist`) is the only MySQL-specific bit; it is replaced by this profile.
+
+The backend starts on **http://localhost:8080**. Swagger UI is at `http://localhost:8080/swagger-ui.html`.
+
+## Frontend Setup
+
+Requirements: Node.js 18+.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Starts the Vite dev server on **http://localhost:5173** and proxies `/api` calls to the backend at `http://localhost:8080` (see `frontend/vite.config.js`). For a production build: `npm run build` (output in `frontend/dist/`).
+
+## Admin Account & Data Entry
+
+No demo data is seeded. On startup `DataSeeder` only creates the platform admin, and only when no admin exists yet (admins cannot self-register):
+
+| Role  | Email             | Password  |
+|-------|-------------------|-----------|
+| Admin | admin@booking.com | Admin@123 |
+
+Override these with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables before the first boot.
+
+Everything else is entered through the app:
+
+1. As admin, add service categories in Admin » Categories (and any coupons in Admin » Coupons).
+2. Providers register via **Create an account** → *I'm a Service Provider*; the admin approves them in Admin » Providers. Each provider then signs in to **their own** dashboard (`/dashboard/provider`) to add services, staff, and availability.
+3. Customers register via **Create an account** and book from there.
+
+## Feature Overview
+
+**Customer**
+- Browse/search providers by city & category; view provider details, services, staff, reviews.
+- 3-step booking wizard: pick a service → pick an appointment slot → pay at venue or pay online (Razorpay-style flow).
+- Coupon codes applied at checkout with discount calculation.
+- Dashboard: upcoming/past appointments, cancellation, rescheduling, status timeline.
+- Leave ratings & reviews, manage saved addresses, notifications, profile.
+
+**Provider**
+- Dashboard with today's appointments and monthly revenue.
+- Manage services, staff, weekly availability + date overrides, earnings, and profile.
+- Accept/reject/complete appointments.
+
+**Admin**
+- Platform stats, approval of pending provider registrations.
+- User management (view, activate/deactivate), category management, coupon CRUD.
+
+## Payment Flow
+
+- `PAY_AT_VENUE` → appointment immediately `CONFIRMED`.
+- `RAZORPAY` → appointment starts `PENDING`; after `POST /api/payments/create-order` and `POST /api/payments/verify`, the appointment moves to `CONFIRMED` with the recorded payment.
+>>>>>>> a52368e (backendcommit)

@@ -15,6 +15,7 @@ public interface ProviderRepository extends JpaRepository<Provider, Long>, JpaSp
 
     long countByStatus(ProviderStatus status);
 
+<<<<<<< HEAD
     List<Provider> findByStatus(ProviderStatus status);
 
     /** Serialises bookings per provider so capacity checks are race-free (FR-22). */
@@ -22,3 +23,9 @@ public interface ProviderRepository extends JpaRepository<Provider, Long>, JpaSp
     @Query("select p from Provider p where p.id = :id")
     Optional<Provider> lockById(@Param("id") Long id);
 }
+=======
+    boolean existsByCategoryId(Long categoryId);
+
+    List<Provider> findTop6ByStatusOrderByRatingDesc(ProviderStatus status);
+}
+>>>>>>> a52368e (backendcommit)

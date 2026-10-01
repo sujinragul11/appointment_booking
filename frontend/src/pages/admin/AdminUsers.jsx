@@ -90,6 +90,7 @@ export default function AdminUsers() {
   };
 
   return (
+<<<<<<< HEAD
     <AdminLayout
       title={t('admin.users.title')}
       subtitle={t('admin.users.subtitle')}
@@ -113,6 +114,18 @@ export default function AdminUsers() {
           </button>
         ) : null}
       </div>
+=======
+    <div className="dash">
+      <aside className="dash-side">
+        <nav className="dash-nav">
+          <Link to="/dashboard/admin">Overview</Link>
+          <Link to="/dashboard/admin/providers">Providers</Link>
+          <Link to="/dashboard/admin/categories">Categories</Link>
+          <Link to="/dashboard/admin/users" className="active">Users</Link>
+          <Link to="/dashboard/admin/coupons">Coupons</Link>
+        </nav>
+      </aside>
+>>>>>>> a52368e (backendcommit)
 
       <DataState loading={list.loading} error={list.error} hasData={Boolean(page)} onRetry={list.reload}
         empty={Boolean(page) && users.length === 0} emptyTitle={t('admin.users.empty')} emptyText={filtered ? t('admin.users.emptyText') : null}>

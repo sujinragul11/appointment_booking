@@ -10,7 +10,11 @@ import Field, { ErrorSummary } from './components/Field';
 import ImageUpload from './components/ImageUpload';
 import useLoad, { fieldErrorsOf } from './lib/useLoad';
 
+<<<<<<< HEAD
 export const SERVICE_MODES = ['IN_PERSON', 'ONLINE', 'BOTH'];
+=======
+const EMPTY = { name: '', description: '', durationMin: 30, bufferMin: 10, price: '', categoryId: '', imageUrl: '', active: true, staffIds: [] };
+>>>>>>> a52368e (backendcommit)
 
 const EMPTY = {
   name: '', description: '', categoryId: '', durationMin: '30', bufferMin: '10', price: '', depositPercent: '0',
@@ -203,6 +207,7 @@ function ServiceForm({ service, staff, categories, providerDefaultDays, onSaved,
                 </label>
               ))}
             </div>
+<<<<<<< HEAD
           )}
           {errors.staffIds && <p className="hint error-text">{errors.staffIds}</p>}
         </fieldset>
@@ -221,6 +226,35 @@ function ServiceForm({ service, staff, categories, providerDefaultDays, onSaved,
         </div>
       </form>
     </Modal>
+=======
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <div className="field"><label>Duration (min)</label><input type="number" min={5} value={form.durationMin} onChange={(e) => setForm({ ...form, durationMin: e.target.value })} required /></div>
+              <div className="field"><label>Buffer (min)</label><input type="number" min={0} value={form.bufferMin} onChange={(e) => setForm({ ...form, bufferMin: e.target.value })} /></div>
+              <div className="field"><label>Price ({'\u20B9'})</label><input type="number" min={0.01} step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required /></div>
+            </div>
+            <div className="field">
+              <label>Team members who offer this</label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {staff.map((st) => (
+                  <label key={st.id} style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                    <input type="checkbox"
+                      checked={(form.staffIds || []).includes(st.id)}
+                      onChange={(e) => setForm({ ...form, staffIds: e.target.checked ? [...(form.staffIds || []), st.id] : (form.staffIds || []).filter((x) => x !== st.id) })} />
+                    {st.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0 16px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+              Active (bookable)
+            </label>
+            <button className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Saving...' : (editing ? 'Update' : 'Add service')}</button>
+          </form>
+        </Modal>
+      )}
+    </div>
+>>>>>>> a52368e (backendcommit)
   );
 }
 

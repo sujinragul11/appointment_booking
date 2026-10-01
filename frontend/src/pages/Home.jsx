@@ -5,6 +5,7 @@ import ProviderCard from '../components/ProviderCard';
 import { InlineLoader } from '../components/Loader';
 import { useT } from '../i18n';
 
+<<<<<<< HEAD
 // `name` must match the category name in the backend; it is resolved to an id on /providers.
 const QUICK = [
   { icon: '⚕', key: 'doctor', name: 'Doctor' },
@@ -30,6 +31,8 @@ function HeroTitle({ text }) {
   ));
 }
 
+=======
+>>>>>>> a52368e (backendcommit)
 export default function Home() {
   const t = useT();
   const navigate = useNavigate();
@@ -72,6 +75,7 @@ export default function Home() {
             <button className="btn btn-primary" type="submit">{t('home.searchButton')}</button>
           </form>
 
+<<<<<<< HEAD
           <div className="mt-4 quick-chips">
             <span className="quick-label">{t('home.popular')}</span>
             {QUICK.map((c) => (
@@ -80,6 +84,18 @@ export default function Home() {
               </Link>
             ))}
           </div>
+=======
+          {categories.length > 0 && (
+            <div className="mt-4" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--muted)', fontSize: '0.88rem', paddingTop: 8 }}>Popular:</span>
+              {categories.slice(0, 6).map((c) => (
+                <Link key={c.id} to={`/providers?cat=${c.id}`} className="chip">
+                  <span>{c.icon || '✦'}</span> {c.name}
+                </Link>
+              ))}
+            </div>
+          )}
+>>>>>>> a52368e (backendcommit)
         </div>
       </section>
 

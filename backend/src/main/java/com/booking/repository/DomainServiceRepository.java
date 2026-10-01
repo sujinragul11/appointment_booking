@@ -10,7 +10,14 @@ public interface DomainServiceRepository extends JpaRepository<DomainService, Lo
 
     List<DomainService> findByProviderIdOrderByNameAsc(Long providerId);
 
+<<<<<<< HEAD
     List<DomainService> findByProviderIdAndActiveTrueOrderByNameAsc(Long providerId);
 
     boolean existsByCategoryId(Long categoryId);
 }
+=======
+    List<DomainService> findByProviderIdAndActiveTrue(Long providerId);
+
+    boolean existsByCategoryId(Long categoryId);
+}
+>>>>>>> a52368e (backendcommit)

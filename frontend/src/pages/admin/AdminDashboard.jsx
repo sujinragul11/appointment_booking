@@ -70,6 +70,7 @@ export default function AdminDashboard() {
   const busiest = daily ? peak(daily.dates.map((date, i) => ({ date, bookings: daily.bookings[i] })), 'bookings') : null;
 
   return (
+<<<<<<< HEAD
     <AdminLayout title={t('admin.dashboard.title')} subtitle={t('admin.dashboard.subtitle')}>
       <DataState loading={stats.loading} error={stats.error} hasData={Boolean(s)} onRetry={stats.reload}>
         {s ? (
@@ -88,6 +89,18 @@ export default function AdminDashboard() {
                 ))}
               </ul>
             </section>
+=======
+    <div className="dash">
+      <aside className="dash-side">
+        <nav className="dash-nav">
+          <Link to="/dashboard/admin" className="active">Overview</Link>
+          <Link to="/dashboard/admin/providers">Providers</Link>
+          <Link to="/dashboard/admin/categories">Categories</Link>
+          <Link to="/dashboard/admin/users">Users</Link>
+          <Link to="/dashboard/admin/coupons">Coupons</Link>
+        </nav>
+      </aside>
+>>>>>>> a52368e (backendcommit)
 
             <section className="admin-section" aria-labelledby="dash-kpis">
               <h2 id="dash-kpis" className="admin-h2">{t('admin.dashboard.kpis')}</h2>
