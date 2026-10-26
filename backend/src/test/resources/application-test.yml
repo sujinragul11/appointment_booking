@@ -1,6 +1,6 @@
 # Profile "test": used by the automated test suite (mvn verify).
 # In-memory H2 in PostgreSQL mode (same URL style as application-dev.yml, unique DB name),
-# Flyway migrations + Hibernate ddl validation, no demo data, simulated payments.
+# Flyway migrations + Hibernate ddl validation, simulated payments.
 spring:
   datasource:
     url: jdbc:h2:mem:booking_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=20000
@@ -22,8 +22,6 @@ app:
   jwt:
     secret: ""
     allow-ephemeral-secret: true
-  seed:
-    demo-data: false
   bootstrap-admin:
     email: ""
     password: ""

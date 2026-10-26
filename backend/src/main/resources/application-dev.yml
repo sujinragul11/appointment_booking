@@ -1,4 +1,5 @@
-# Zero-setup local profile: in-memory H2 (PostgreSQL mode) + demo data.
+# Zero-setup local profile: in-memory H2 (PostgreSQL mode). The database starts empty on every run;
+# set ADMIN_EMAIL / ADMIN_PASSWORD to have the first admin account created at startup.
 #   mvn spring-boot:run -Dspring-boot.run.profiles=dev
 spring:
   datasource:
@@ -13,8 +14,6 @@ spring:
 app:
   jwt:
     allow-ephemeral-secret: true
-  seed:
-    demo-data: true
   payments:
     demo-mode: ${PAYMENTS_DEMO_MODE:true}
   security:

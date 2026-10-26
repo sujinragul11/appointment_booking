@@ -75,12 +75,7 @@ export default {
       resetInstead: 'Reset your password',
       or: 'or',
       googleFailed: 'Google sign-in failed. Please try again.',
-      googleUnavailable: 'Google sign-in is unavailable right now.',
-      demoRole: {
-        customer: 'Customer',
-        staff: 'Staff',
-        admin: 'Admin'
-      }
+      googleUnavailable: 'Google sign-in is unavailable right now.'
     },
     register: {
       verifyNote: "After signing up we'll e-mail you a 6-digit code to verify your address.",

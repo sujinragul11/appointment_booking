@@ -5,26 +5,8 @@ import { useToast } from '../components/Toast';
 import GoogleSignIn from '../components/GoogleSignIn';
 import { InlineLoader } from '../components/Loader';
 import api, { getErrorMessage, setTokens } from '../api/client';
-import useSiteConfig from '../hooks/useSiteConfig';
 import { useT } from '../i18n';
 import { homePathFor, nextFromLocation } from '../utils/routes';
-
-// One-click demo logins; shown only in development / payments demo mode (never with live payments).
-const DEMOS = [
-  ['customer', 'customer@booking.com', 'Customer@123'],
-  ['customer', 'anita@booking.com', 'Customer@123'],
-  ['staff', 'staff@booking.com', 'Staff@123'],
-  ['admin', 'admin@booking.com', 'Admin@123']
-];
-
-const PROVIDERS = [
-  ['Smile Dental Clinic', 'provider@booking.com', 'Provider@123'],
-  ['Glow & Glam Salon', 'salon@booking.com', 'Salon@123'],
-  ['CareWell Physiotherapy', 'physio@booking.com', 'Physio@123'],
-  ['Bright Minds Tutoring', 'tutor@booking.com', 'Tutor@123'],
-  ['Perfect Skin Clinic', 'skin@booking.com', 'Skin@123'],
-  ['Nova Fitness Studio', 'fitness@booking.com', 'Fitness@123']
-];
 
 export default function Login() {
   const { login, updateUser } = useAuth();
@@ -32,7 +14,6 @@ export default function Login() {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const config = useSiteConfig();
   const next = nextFromLocation(location);
 
   const [email, setEmail] = useState(location.state?.email || '');
@@ -76,7 +57,6 @@ export default function Login() {
   };
 
   const registerLink = next ? `/register?next=${encodeURIComponent(next)}` : '/register';
-  const showDemos = import.meta.env.DEV || config?.paymentsDemoMode;
 
   return (
     <div className="container page auth-page">
@@ -121,29 +101,6 @@ export default function Login() {
           {t('auth.newHere')} <Link to={registerLink}>{t('auth.createAccountLink')}</Link>
         </p>
       </div>
-
-      {showDemos && (
-        <section className="demo-accounts mt-3" aria-labelledby="demo-title">
-          <h2 id="demo-title" className="demo-title">{t('auth.demoTitle')}</h2>
-          <p className="mt-1">{t('auth.demoText')}</p>
-          <div className="chip-row mt-1">
-            {DEMOS.map(([role, em, pw]) => (
-              <button key={em} type="button" className="chip" onClick={() => { setEmail(em); setPassword(pw); }}>
-                {t(`site.auth.demoRole.${role}`)}: <code>{em}</code>
-              </button>
-            ))}
-          </div>
-          <div className="divider-h my-2" />
-          <p>{t('auth.demoProviders')}</p>
-          <div className="chip-row mt-1">
-            {PROVIDERS.map(([name, em, pw]) => (
-              <button key={em} type="button" className="chip" onClick={() => { setEmail(em); setPassword(pw); }}>
-                {name} <code>{em}</code>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   );
 }

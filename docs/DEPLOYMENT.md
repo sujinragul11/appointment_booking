@@ -5,7 +5,7 @@
 Requirements: JDK 17+, Maven 3.9+, Node.js 18+ (22 recommended).
 
 ```bash
-# API with an in-memory database, demo data and simulated payments
+# API with an in-memory database (starts empty) and simulated payments
 cd backend
 mvn spring-boot:run -Dspring-boot.run.profiles=dev          # http://localhost:8080
 
@@ -18,14 +18,15 @@ npm run dev                                                   # http://localhost
 * Swagger UI: http://localhost:8080/swagger-ui.html
 * H2 console (dev only): http://localhost:8080/h2-console (JDBC URL `jdbc:h2:mem:bookingdb`, user `sa`)
 * E-mails and SMS are **logged to the API console** in dev (look for `[EMAIL:log]` / `[SMS:log]` - e.g. the OTP and the password-reset link).
-* Demo accounts: see the README.
+* First admin account: set `ADMIN_EMAIL` / `ADMIN_PASSWORD` before starting the API (see the README).
 
 To use a local PostgreSQL instead of H2, run without the `dev` profile:
 
 ```bash
 createdb booking_db
 export DB_PASSWORD=... JWT_SECRET=$(openssl rand -base64 48)
-export SEED_DEMO_DATA=true PAYMENTS_DEMO_MODE=true   # optional, for a demo
+export ADMIN_EMAIL=... ADMIN_PASSWORD=...            # first admin account
+export PAYMENTS_DEMO_MODE=true                       # optional, simulated payment gateway
 mvn spring-boot:run
 ```
 
@@ -46,7 +47,6 @@ Services: `db` (PostgreSQL 16), `redis` (slot locks), `backend`, `frontend` (ngi
 `mailhog`, `backup` (daily `pg_dump` into `./backups`, 7-day retention).
 
 The first admin is created from `ADMIN_EMAIL` / `ADMIN_PASSWORD` when the database has no admin yet.
-For a demo with sample data set `SEED_DEMO_DATA=true` and `PAYMENTS_DEMO_MODE=true` **before the first start**.
 
 ## 3. Production checklist
 
@@ -54,7 +54,7 @@ For a demo with sample data set `SEED_DEMO_DATA=true` and `PAYMENTS_DEMO_MODE=tr
 |---|---|
 | Secrets | `JWT_SECRET` (≥ 32 random bytes, base64), strong `DB_PASSWORD`; keep `.env` out of git or use the platform's secret store |
 | HTTPS (NFR-3) | Terminate TLS at the load balancer / nginx (e.g. Let's Encrypt). The API sends HSTS; set `APP_URL` to the https URL |
-| Demo features | `SEED_DEMO_DATA=false`, `PAYMENTS_DEMO_MODE=false` (both default to false) |
+| Demo features | `PAYMENTS_DEMO_MODE=false` (the default) |
 | Payments | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`; configure a webhook to `https://<host>/api/payments/webhook` (events `payment.captured`, `payment.failed`) and set `RAZORPAY_WEBHOOK_SECRET` |
 | E-mail | SMTP credentials (SendGrid: host `smtp.sendgrid.net`, user `apikey`; Amazon SES; ...), `MAIL_ENABLED=true`, `MAIL_FROM` on a verified domain |
 | SMS | `SMS_PROVIDER=twilio` + `TWILIO_*` |

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import ProviderCard from '../components/ProviderCard';
+import ProviderCard, { priceRange } from '../components/ProviderCard';
 import { InlineLoader } from '../components/Loader';
 import { useT } from '../i18n';
 
@@ -44,34 +44,108 @@ export default function Home() {
     navigate(`/providers${query ? `?${query}` : ''}`);
   };
 
+  const featured = top?.[0];
+  const featuredWhere = featured ? [featured.city, featured.country].filter(Boolean).join(', ') : '';
+  const featuredPrices = featured ? priceRange(featured.minPrice, featured.maxPrice) : '';
+
   return (
     <>
       <section className="hero">
-        <div className="container">
-          <h1><HeroTitle text={t('home.heroTitle')} /></h1>
-          <p>{t('home.heroText')}</p>
+        <div className="container hero-grid">
+          <div className="hero-copy">
+            <p className="hero-eyebrow">
+              <span className="hero-eyebrow-mark" aria-hidden="true">✦</span>
+              {t('home.heroEyebrow')}
+            </p>
+            <h1><HeroTitle text={t('home.heroTitle')} /></h1>
+            <p>{t('home.heroText')}</p>
 
-          <form className="search-panel" onSubmit={search} role="search" aria-label={t('site.home.searchLabel')}>
-            <label htmlFor="home-q" className="sr-only">{t('site.home.whatLabel')}</label>
-            <input id="home-q" placeholder={t('site.home.whatPlaceholder')} value={q}
-              onChange={(e) => setQ(e.target.value)} />
-            <div className="divider" aria-hidden="true" />
-            <label htmlFor="home-city" className="sr-only">{t('site.home.whereLabel')}</label>
-            <input id="home-city" placeholder={t('site.home.wherePlaceholder')} value={city} onChange={(e) => setCity(e.target.value)}
-              autoComplete="address-level2" />
-            <button className="btn btn-primary" type="submit">{t('home.searchButton')}</button>
-          </form>
+            <form className="search-panel" onSubmit={search} role="search" aria-label={t('site.home.searchLabel')}>
+              <label htmlFor="home-q" className="sr-only">{t('site.home.whatLabel')}</label>
+              <input id="home-q" placeholder={t('site.home.whatPlaceholder')} value={q}
+                onChange={(e) => setQ(e.target.value)} />
+              <div className="divider" aria-hidden="true" />
+              <label htmlFor="home-city" className="sr-only">{t('site.home.whereLabel')}</label>
+              <input id="home-city" placeholder={t('site.home.wherePlaceholder')} value={city} onChange={(e) => setCity(e.target.value)}
+                autoComplete="address-level2" />
+              <button className="btn btn-primary" type="submit">{t('home.searchButton')}</button>
+            </form>
 
-          {categories?.length > 0 && (
-            <div className="mt-4" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <span style={{ color: 'var(--muted)', fontSize: '0.88rem', paddingTop: 8 }}>Popular:</span>
-              {categories.slice(0, 6).map((c) => (
-                <Link key={c.id} to={`/providers?categoryId=${c.id}`} className="chip">
-                  <span>{c.icon || '✦'}</span> {c.name}
-                </Link>
+            <ul className="hero-trust plain-list">
+              {[t('home.trustVerified'), t('home.trustInstant'), t('home.trustFlexible')].map((item) => (
+                <li key={item}>
+                  <span className="hero-trust-mark" aria-hidden="true">✓</span>
+                  {item}
+                </li>
               ))}
-            </div>
-          )}
+            </ul>
+
+            {categories?.length > 0 && (
+              <div className="hero-popular">
+                <span className="hero-popular-label">{t('home.popular')}</span>
+                {categories.slice(0, 6).map((c) => (
+                  <Link key={c.id} to={`/providers?categoryId=${c.id}`} className="chip">
+                    <span aria-hidden="true">{c.icon || '✦'}</span> {c.name}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <aside className="hero-aside" aria-label={t('home.featured')}>
+            <div className="hero-aside-glow" aria-hidden="true" />
+            {featured ? (
+              <article className="hero-feature">
+                <div className="hero-feature-media">
+                  {featured.coverUrl
+                    ? <img src={featured.coverUrl} alt="" loading="lazy" />
+                    : <span className="hero-feature-monogram" aria-hidden="true">{featured.category?.icon || '✦'}</span>}
+                  <span className="hero-feature-badge">{t('home.featured')}</span>
+                </div>
+                <div className="hero-feature-body">
+                  <div className="hero-feature-head">
+                    <div className="hero-feature-logo" aria-hidden="true">
+                      {featured.logoUrl ? <img src={featured.logoUrl} alt="" loading="lazy" /> : <span>{featured.category?.icon || '✦'}</span>}
+                    </div>
+                    <div className="hero-feature-id">
+                      <h2 className="hero-feature-name">{featured.businessName}</h2>
+                      <p className="hero-feature-meta">
+                        {[featured.specialty || featured.category?.name, featuredWhere].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                    {featured.reviewCount > 0 && (
+                      <span className="hero-feature-rating">
+                        <span aria-hidden="true">★</span> {Number(featured.rating || 0).toFixed(1)}
+                        <span className="sr-only"> {t('site.rating.outOf5')}</span>
+                      </span>
+                    )}
+                  </div>
+                  {featured.description && (
+                    <p className="hero-feature-desc">
+                      {featured.description.length > 128 ? `${featured.description.slice(0, 128)}…` : featured.description}
+                    </p>
+                  )}
+                  <div className="hero-feature-foot">
+                    <span className="hero-feature-price">{featuredPrices || t('site.providers.noPrices')}</span>
+                    <Link to={`/providers/${featured.id}`} className="btn btn-primary btn-sm">
+                      {t('common.bookNow')} <span aria-hidden="true">&rarr;</span>
+                    </Link>
+                  </div>
+                </div>
+                <p className="hero-float">
+                  <span className="hero-float-mark" aria-hidden="true">✦</span>
+                  {t('home.heroFloat')}
+                </p>
+              </article>
+            ) : (
+              <div className="hero-feature hero-feature-skeleton" aria-hidden="true">
+                <div className="hero-skeleton-media" />
+                <div className="hero-skeleton-lines">
+                  <span /><span /><span />
+                </div>
+              </div>
+            )}
+          </aside>
         </div>
       </section>
 

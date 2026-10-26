@@ -168,7 +168,6 @@
                 <configuration>
                     <excludes>
                         <exclude>com/booking/BookingApplication.class</exclude>
-                        <exclude>com/booking/config/DataSeeder*.class</exclude>
                         <exclude>com/booking/dto/**</exclude>
                     </excludes>
                 </configuration>

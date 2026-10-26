@@ -49,7 +49,7 @@ export function usePayment({ onPaid, onDismiss, onError }) {
         description: order.description,
         prefill: { name: order.customerName || '', email: order.customerEmail || '', contact: order.customerPhone || '' },
         notes: { bookingRef: order.bookingRef || '' },
-        theme: { color: '#4f46e5' },
+        theme: { color: '#144D3A' },
         handler: async (response) => {
           setBusy(true);
           try {

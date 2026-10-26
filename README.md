@@ -13,8 +13,7 @@ consultants, tutors, trainers…), providers and their staff manage their schedu
 ### Option A — everything in Docker
 
 ```bash
-cp .env.example .env    # set DB_PASSWORD and JWT_SECRET (openssl rand -base64 48)
-                        # for a demo also set SEED_DEMO_DATA=true and PAYMENTS_DEMO_MODE=true
+cp .env.example .env    # set DB_PASSWORD, JWT_SECRET (openssl rand -base64 48), ADMIN_EMAIL and ADMIN_PASSWORD
 docker compose up -d --build
 ```
 
@@ -25,31 +24,20 @@ Open http://localhost:8081 (API docs at http://localhost:8081/swagger-ui.html, e
 Requirements: JDK 17+, Maven 3.9+, Node.js 18+.
 
 ```bash
-cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=dev     # API on :8080, in-memory DB + demo data
+cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=dev     # API on :8080, in-memory DB
 cd frontend && npm ci && npm run dev                                  # web app on :5173
 ```
 
 In the `dev` profile, e-mails and SMS (verification codes, password-reset links, reminders) are printed in the API
 console, and online payments use a simulated gateway.
 The profile uses an in-memory H2 database in PostgreSQL compatibility mode and exposes the H2 console at
-`http://localhost:8080/h2-console`.
+`http://localhost:8080/h2-console`. It starts empty and is discarded when the API stops.
 
-## Demo accounts (`dev` profile or `SEED_DEMO_DATA=true`)
+## First admin account
 
-| Role | E-mail | Password | Notes |
-|---|---|---|---|
-| Admin | admin@booking.com | Admin@123 | Admin panel |
-| Customer | customer@booking.com | Customer@123 | Has past, upcoming and cancelled bookings |
-| Customer | anita@booking.com | Customer@123 | |
-| Provider | provider@booking.com | Provider@123 | Smile Dental Clinic — services booked with a dentist (staff) |
-| Staff | staff@booking.com | Staff@123 | Dr. Arun Prakash at Smile Dental (own schedule) |
-| Provider | salon@booking.com | Salon@123 | Glow & Glam Salon — 3 parallel bookings per slot |
-| Provider | tutor@booking.com | Tutor@123 | Bright Minds Tutoring — London timezone, online lessons |
-| Provider | doctor@booking.com | Doctor@123 | HealthFirst Clinic — in-person or video consultation |
-| Provider | physio@booking.com, skin@booking.com, fitness@booking.com, consultant@booking.com | Physio@123, Skin@123, Fitness@123, Consult@123 | |
-| Provider (pending approval) | newclinic@booking.com | Provider@123 | Visible to admins only until approved |
-
-Coupons: `FIRST50` (₹50 off, once per customer), `SAVE20` (20 % off orders ≥ ₹500, max ₹200), `WELCOME100`.
+The database ships with no accounts or sample data. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` (8+ characters with upper
+case, lower case and a number) before starting the API; the admin is created when no admin exists yet. Sign in as that
+admin to add categories and approve providers; customers and providers register through the web app.
 
 ## What's included
 
@@ -96,5 +84,5 @@ The complete requirement-by-requirement mapping is in [docs/REQUIREMENTS_TRACEAB
 cd backend  && mvn verify             # unit + integration tests, fails below 70 % line coverage
 cd frontend && npm test               # component and unit tests (Vitest)
 cd frontend && npm run e2e            # end-to-end tests (Playwright; needs the dev API on :8080)
-k6 run loadtest/k6-booking.js         # load test
+k6 run loadtest/k6-booking.js         # load test (needs LOGIN_EMAIL, LOGIN_PASSWORD, PROVIDER_ID, SERVICE_ID; see the file)
 ```

@@ -110,7 +110,7 @@ stateDiagram-v2
 | `security` | JWT issue/verify, filters, rate limiting, Google token verification |
 | `entity`, `repository` | JPA model and Spring Data repositories |
 | `dto`, `mapper` | API contracts and entity → DTO mapping |
-| `config` | Security, CORS, OpenAPI, clock, async, seed data, admin bootstrap |
+| `config` | Security, CORS, OpenAPI, clock, async, admin bootstrap |
 
 ## Frontend layout
 

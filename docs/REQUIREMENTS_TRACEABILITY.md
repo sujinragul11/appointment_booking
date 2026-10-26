@@ -214,7 +214,7 @@ All sample endpoints exist with the same method and path — see the table at th
 | Deliverable | Location |
 |---|---|
 | Source code | `backend/`, `frontend/` |
-| Database migrations & seed data | `backend/src/main/resources/db/migration`, `config/DataSeeder.java` (dev/demo only) |
+| Database migrations & first admin | `backend/src/main/resources/db/migration`, `config/AdminBootstrap.java` |
 | API documentation | Swagger UI, `docs/API.md`, `docs/openapi.json` (Postman import) |
 | ER diagram & architecture diagram | `docs/ER_DIAGRAM.md`, `docs/ARCHITECTURE.md` |
 | User manual | `docs/USER_MANUAL.md` |

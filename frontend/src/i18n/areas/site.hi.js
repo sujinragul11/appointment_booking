@@ -75,12 +75,7 @@ export default {
       resetInstead: 'अपना पासवर्ड रीसेट करें',
       or: 'या',
       googleFailed: 'Google से साइन इन नहीं हो सका। कृपया फिर से कोशिश करें।',
-      googleUnavailable: 'Google साइन-इन अभी उपलब्ध नहीं है।',
-      demoRole: {
-        customer: 'ग्राहक',
-        staff: 'स्टाफ़',
-        admin: 'एडमिन'
-      }
+      googleUnavailable: 'Google साइन-इन अभी उपलब्ध नहीं है।'
     },
     register: {
       verifyNote: 'साइन अप करने के बाद हम आपका पता सत्यापित करने के लिए आपको 6 अंकों का कोड ईमेल करेंगे।',
